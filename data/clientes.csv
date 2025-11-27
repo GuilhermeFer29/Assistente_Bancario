@@ -1,0 +1,4 @@
+cpf,nome,dt_nascimento,score_credito,renda_mensal,limite_credito
+12345678901,Guilherme Fernandes,1995-02-13,750,5000.0,15000.0
+98765432100,Leci Cardoso ,1996-08-16,680,3000.0,9000.0
+11122233344,Safira Cardoso,2000-11-07,720,4500.0,13500.0
