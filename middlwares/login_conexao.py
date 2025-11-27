@@ -3,7 +3,7 @@ from fastapi import Request
 import time
 
 class LoginConexaoMiddleware(BaseHTTPMiddleware):
-    async def despachando(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         start_time = time.time()
         response = await call_next(request)
         processndo_time = time.time() - start_time

@@ -1,15 +1,46 @@
-from agno import Agent
+from agno.agent import Agent
 from agno.models.google import Gemini
 from agno.tools.tavily import TavilyTools
 from dotenv import load_dotenv
-import tools 
+from tools import tools 
 from typing import Dict
 
 load_dotenv()
 
 model = Gemini(id="gemini-2.5-flash", temperature=0.3)
+# Dicionário para armazenar o estado de autenticação por sessão
+session_states: Dict[str, Dict] = {}
 
-# Agente De Analise de Cambio 
+def get_auth_tool_for_session(session_id: str):
+    """Feramenta de validação de cliente com controle de tentativas por sessão."""
+    if session_id not in session_states:
+        session_states[session_id] = {'erros': 0, 'bloqueado': False}
+
+    def validar_cliente_com_seguranca(cpf: str, data_nascimento: str) -> str:
+        state = session_states[session_id]
+
+        if state['bloqueado'] or state['erros'] >= 3:
+            return "SISTEMA: Acesso BLOQUEADO por excesso de tentativas. O atendimento deve ser encerrado imediatamente."
+
+        try:
+            resultado = tools.validando_cliente(cpf, data_nascimento) 
+        except AttributeError:
+            return "Erro técnico: Função de validação não encontrada no tools.py"
+
+        if "FALHA" in resultado or "Erro" in resultado or "Não" in resultado:
+            state['erros'] += 1
+            tentativas_restantes = 3 - state['erros']
+            
+            if state['erros'] >= 3:
+                state['bloqueado'] = True
+                return "FALHA FINAL: Você excedeu o número máximo de 3 tentativas. O sistema bloqueou o acesso. Encerre o atendimento."
+            
+            return f"FALHA: Dados incorretos. Você tem mais {tentativas_restantes} tentativas."
+        
+        return resultado
+
+    return validar_cliente_com_seguranca
+
 cambio_search_agent = Agent(
     name = "Agente de Câmbio",
     role="Especialista em Analise de moedas estrangeiras e mercado cambial.",
@@ -23,16 +54,13 @@ cambio_search_agent = Agent(
         "Após Informar a Coração, encerre seu atendimento cordialmente."
     ],
     model=model,
-    show_tool_calls=True,
     markdown=True
 )
-
-# Agente Entrevistador de credito 
 
 entrevistador_credito_agent = Agent(
     name = "Agente de Entrevista de Crédito",
     role="Especialista em análise de crédito e avaliação financeira.",
-    tools=[tools.atualizar_score_cliente()],
+    tools=[tools.atualizar_score_cliente],
     instructions=[
         "Seu objetivo é entrevistar o cliente para recalcular seu score financeiro.",
         "Você DEVE coletar as seguintes informações obrigatoriamente:",
@@ -46,18 +74,16 @@ entrevistador_credito_agent = Agent(
         "Após atualizar, informe o novo score e sugira voltar ao Agente de Crédito."
     ],
     model=model,
-    show_tool_calls=True,
     markdown=True
 )
-# Agente de Analise de credito
 
 analise_credito_agent = Agent(
     name = "Agente de Crédito",
     role="Gestor de limites de Crédito",
     tools=[
-        tools.validando_cliente(),
-        tools.consultando_limite(),
-        tools.solicitacao_de_limite(),
+        tools.validando_cliente,
+        tools.consultando_limite,
+        tools.solicitacao_de_limite,
     ],
     instructions=[
         "Seu objetivo é gerenciar limites de crédito para clientes bancários.",
@@ -69,52 +95,67 @@ analise_credito_agent = Agent(
         "Finalize o atendimento de forma cordial."
     ],
     model=model,
-    show_tool_calls=True,
     markdown=True
 )
 
-# Agente de Triagem Responsavel por liderar o fluxo entre os agentes
+# Criação do Agente de Triagem com autenticação segura
+def criar_agente_triagem(session_id: str) -> Agent:
+    ferramenta_validacao_segura = get_auth_tool_for_session(session_id)
 
-triagem_agent = Agent(
-    name="Agente de Triagem",
-    role="Recepcionista e Coordenador de Atendimento ao Cliente",
-    tools=[tools.validando_cliente()],
-    team=[
-        cambio_search_agent,
-        entrevistador_credito_agent,
-        analise_credito_agent
-    ],
-    instructions=[
-        "Você é o primeiro contato do Banco Ágil. Siga este fluxo ESTRITAMENTE:",
-        "--- FASE 1: AUTENTICAÇÃO ---",
-        "1. Verifique no histórico se o cliente já foi autenticado (se já temos o nome e CPF confirmados).",
-        "2. Se NÃO autenticado: Solicite CPF e Data de Nascimento.",
-        "3. Use a ferramenta `validando_cliente` para conferir os dados.",
-        "4. Se a ferramenta retornar erro/falso, peça os dados novamente (máximo 2 tentativas extras). Se falhar 3 vezes, encerre educadamente.",
-        "--- FASE 2: DIRECIONAMENTO ---",
-        "5. APENAS SE AUTENTICADO COM SUCESSO: Pergunte ou identifique como pode ajudar.",
-        "6. Com base na intenção, delegue para o membro correto da sua equipe (team):",
-        "   - 'Quero ver meu limite' ou 'Aumentar limite' -> Chame o Agente de Crédito ('analise_credito_agent').",
-        "   - 'Atualizar cadastro' ou 'Melhorar score' -> Chame o Agente de Entrevista ('entrevistador_credito_agent').",
-        "   - 'Cotação de moeda' -> Chame o Agente de Câmbio ('cambio_search_agent').",
-        "Não tente resolver problemas de crédito ou câmbio sozinho. Use sua equipe."
-    ],
-    model=model,
-    show_tool_calls=True,
-    markdown=True,
-    debug_mode=True
-)
+    def chamar_agente_cambio(solicitacao: str) -> str:
+        """Aciona o especialista em câmbio para cotações."""
+        response = cambio_search_agent.run(solicitacao, session_id=session_id)
+        return str(response.content)
 
-#Gerenciador de Sessões dos Agentes
+    def chamar_agente_entrevista(solicitacao: str) -> str:
+        """Aciona o especialista em entrevista para atualizar cadastro/score."""
+        response = entrevistador_credito_agent.run(solicitacao, session_id=session_id)
+        return str(response.content)
+
+    def chamar_agente_credito(solicitacao: str) -> str:
+        """Aciona o especialista em crédito para limites e validações."""
+        response = analise_credito_agent.run(solicitacao, session_id=session_id)
+        return str(response.content)
+
+    return Agent(
+        name="Agente de Triagem",
+        role="Recepcionista e Coordenador de Atendimento ao Cliente",
+        tools=[
+            ferramenta_validacao_segura,
+            chamar_agente_cambio,
+            chamar_agente_entrevista,
+            chamar_agente_credito
+        ], 
+        instructions=[
+            "Você é o primeiro contato do Banco Ágil. Siga este fluxo ESTRITAMENTE:",
+            "--- FASE 1: AUTENTICAÇÃO ---",
+            "1. Verifique no histórico se o cliente já foi autenticado (se já temos o nome e CPF confirmados).",
+            "2. Se NÃO autenticado: Solicite CPF e Data de Nascimento.",
+            "3. Use a ferramenta `validar_cliente_com_seguranca` para conferir os dados.",
+            "4. Se a ferramenta retornar 'FALHA' (e tentativas restantes), peça os dados novamente.",
+            "5. CRÍTICO: Se a ferramenta retornar 'FALHA FINAL' ou 'BLOQUEADO', encerre o atendimento imediatamente e não aceite mais inputs.",
+            "--- FASE 2: DIRECIONAMENTO ---",
+            "6. APENAS SE AUTENTICADO COM SUCESSO: Pergunte ou identifique como pode ajudar.",
+            "7. Com base na intenção, delegue para o membro correto da sua equipe usando as ferramentas disponíveis:",
+            "   - 'Quero ver meu limite' ou 'Aumentar limite' -> Use `chamar_agente_credito`.",
+            "   - 'Atualizar cadastro' ou 'Melhorar score' -> Use `chamar_agente_entrevista`.",
+            "   - 'Cotação de moeda' -> Use `chamar_agente_cambio`.",
+            "Não tente resolver problemas de crédito ou câmbio sozinho. Use as ferramentas de delegação."
+        ],
+        model=model,
+        markdown=True,
+        debug_mode=True
+    )
+
 agent_sessions : Dict[str, Agent] = {}
+
 def secao_agente(session_id: str) -> Agent:
-    """Retorna a sessão do agente de triagem para o ID de sessão fornecido."""
     if session_id not in agent_sessions:
-        agent_sessions[session_id] = triagem_agent
+        agent_sessions[session_id] = criar_agente_triagem(session_id)
     return agent_sessions[session_id]
 
-# Limpando sessões antigas
 def limpar_sessoes_agentes(session_id: str):
-    """Remove a sessão do agente para o ID de sessão fornecido."""
     if session_id in agent_sessions:
         del agent_sessions[session_id]
+        if session_id in session_states:
+            del session_states[session_id]
