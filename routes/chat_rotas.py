@@ -18,9 +18,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             resposta = agent.run(data, stream=False)
             await conexao_master.enviar_mensagem(client_id, resposta.content)
     except WebSocketDisconnect:
-        """Encerra a conexão e limpa a sessão do agente ao desconectar"""
+        """Encerra a conexão ao desconectar, mas MANTÉM a sessão do agente ativa"""
         conexao_master.desconexao(client_id)
-        limpar_sessoes_agentes(client_id)
+        # limpar_sessoes_agentes(client_id) # Removido para persistir memória entre conexões efêmeras
     except Exception as e:
         """Trata outras exceções e envia uma mensagem de erro ao cliente"""
         await conexao_master.enviar_mensagem(client_id, f"Erro no servidor: {str(e)}")

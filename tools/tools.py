@@ -1,39 +1,67 @@
 import pandas as pd
 import datetime
+import re
 
 cliente_db = "data/clientes.csv"
 solicitacoes_db = "data/solicitacoes_aumento_limite.csv"
 scores_db = "data/score_credito_base.csv"
 
+def limpar_cpf(cpf: str) -> str:
+    """Remove caracteres não numéricos do CPF."""
+    return re.sub(r'\D', '', str(cpf))
+
+def normalizar_data(data_str: str) -> str:
+    """Tenta converter a data para o formato YYYY-MM-DD."""
+    try:
+        # Remove espaços extras
+        data_str = data_str.strip()
+        
+        # Tenta converter usando pandas, forçando dayfirst=True para formatos como DD/MM/YYYY
+        # e errors='coerce' para retornar NaT se falhar
+        dt = pd.to_datetime(data_str, dayfirst=True, errors='coerce')
+        
+        if pd.notna(dt):
+            return dt.strftime('%Y-%m-%d')
+        return data_str
+    except:
+        return data_str
 
 def validando_cliente(cpf: str, dt_nascimento: str)-> str:
     """Aqui vamos validar o CPF a Data de Nascimento para conferir se batem com a base de dados em CSV"""
 
     try:
+        cpf_limpo = limpar_cpf(cpf)
+        data_normalizada = normalizar_data(dt_nascimento)
+        
         df_clientes = pd.read_csv(cliente_db, dtype=str)
-        cliente = df_clientes[(df_clientes['cpf'] == cpf) & (df_clientes['dt_nascimento'] == dt_nascimento)]
+        
+        cliente = df_clientes[
+            (df_clientes['cpf'] == cpf_limpo) & 
+            (df_clientes['dt_nascimento'] == data_normalizada)
+        ]
 
         # IF de cliente encontrado
 
         if not cliente.empty:
             return f"Cliente Autenticado: Nome: {cliente.iloc[0]['nome']}. Score Atual: {cliente.iloc[0]['score_credito']}."
         else:
-            return "Cliente não encontrado. Verifique os dados informados."
+            return f"Cliente não encontrado. Verifique os dados informados. (CPF processado: {cpf_limpo}, Data processada: {data_normalizada})"
     except Exception as e:
         return f"Erro ao validar cliente: {str(e)}"
 
 def consultando_limite(cpf:str) -> str:
     """"Aqui iremos verificar o Limite atual do cliente na base de dados CSV""" 
     try:
+        cpf_limpo = limpar_cpf(cpf)
         df_clientes = pd.read_csv(cliente_db, dtype=str)
-        cliente = df_clientes[df_clientes['cpf'] == cpf]
+        cliente = df_clientes[df_clientes['cpf'] == cpf_limpo]
 
         # IF de cliente encontrado
 
         if not cliente.empty:
             return f"Limite Atual do Cliente {cliente.iloc[0]['nome']}: R$ {cliente.iloc[0]['limite_credito']}."
         else:
-            return "Cliente não encontrado. Verifique o CPF informado."
+            return f"Cliente não encontrado. Verifique o CPF informado. (CPF processado: {cpf_limpo})"
     except Exception as e:
         return f"Erro ao consultar limite: {str(e)}"
 
@@ -41,12 +69,13 @@ def solicitacao_de_limite(cpf: str, novo_limite: float) -> str:
     """Aqui vamos processar a solicitação de um novo credito baseado no score do cliente""" 
 
     # Lendo os dados dos clientes e scores
+    cpf_limpo = limpar_cpf(cpf)
     df_clientes = pd.read_csv(cliente_db, dtype={'cpf': str})
     df_scores = pd.read_csv(scores_db)
-    cliente = df_clientes[df_clientes['cpf'] == cpf]
+    cliente = df_clientes[df_clientes['cpf'] == cpf_limpo]
 
     if cliente.empty:
-        return "Cliente não encontrado. Verifique o CPF informado."
+        return f"Cliente não encontrado. Verifique o CPF informado. (CPF processado: {cpf_limpo})"
     score_atual_cliente = float(cliente.iloc[0]['score_credito'])
     limite_atual_cliente = float(cliente.iloc[0]['limite_credito'])
 
@@ -126,13 +155,14 @@ def atualizar_score_cliente(cpf: str, renda: float, tipo_emprego: str,despesas_m
 
     #Tratamento de  erro e persistencia do novo score
     try:
+        cpf_limpo = limpar_cpf(cpf)
         df_clientes = pd.read_csv(cliente_db, dtype={'cpf': str})
-        if cpf in df_clientes['cpf'].values:
-            df_clientes.loc[df_clientes['cpf'] == cpf, 'score_credito'] = novo_score
+        if cpf_limpo in df_clientes['cpf'].values:
+            df_clientes.loc[df_clientes['cpf'] == cpf_limpo, 'score_credito'] = novo_score
             df_clientes.to_csv(cliente_db, index=False)
             return f"Score atualizado com sucesso! Novo score de crédito: {novo_score}."
         else:
-            return "Cliente não encontrado. Verifique o CPF informado."
+            return f"Cliente não encontrado. Verifique o CPF informado. (CPF processado: {cpf_limpo})"
     except Exception as e:
         return f"Erro ao atualizar score: {str(e)}" 
 
