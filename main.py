@@ -11,7 +11,7 @@ app = FastAPI(
 app.add_middleware(LoginConexaoMiddleware)
 app.include_router(chat_rotas.router, prefix="/chat", tags=["Chat"])
 
-app.get("/")
+@app.get("/")
 def home():
     return {"Status": "API do Banco Ágil está rodando!"}
 

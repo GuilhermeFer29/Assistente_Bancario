@@ -27,10 +27,13 @@ def criar_dados_csv():
     score_base_df = pd.DataFrame(score_base_data)
     score_base_df.to_csv('data/score_credito_base.csv', index=False)
     
-    # Arquivo de Solicitaçoes de Crédito
-    if not os.path.exists('data/solicitaçoes_aumento_limite.csv'):
-        df_colunas = pd.DataFrame(columns=["cpf_cliente", "data_hora_solicitacao", "limite_atual", "novo_limite_solicitado", "status_pedido"])
-        df_colunas.to_csv('data/solicitaçoes_aumento_limite.csv', index=False)  
+    # Arquivo de Solicitações de Crédito (padronizado sem cedilha)
+    solicitacoes_path = 'data/solicitacoes_aumento_limite.csv'
+    if not os.path.exists(solicitacoes_path):
+        df_colunas = pd.DataFrame(
+            columns=["cpf_cliente", "data_hora_solicitacao", "limite_atual", "novo_limite_solicitado", "status_pedido"]
+        )
+        df_colunas.to_csv(solicitacoes_path, index=False)
 
     print("Arquivos CSV gerados na pasta 'data/' com sucesso.")
 

@@ -1,7 +1,8 @@
+import os
 import streamlit as st
-import asyncio
-import websockets
 import uuid
+from websockets.sync.client import connect
+from websockets.exceptions import ConnectionClosed
 
 # --- Configuração da Página ---
 st.set_page_config(
@@ -33,9 +34,11 @@ st.markdown("""
 if "client_id" not in st.session_state:
     st.session_state.client_id = str(uuid.uuid4())
 
-# Inicializa histórico de mensagens
+# Inicializa histórico de mensagens e conexão WebSocket
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "ws" not in st.session_state:
+    st.session_state.ws = None
 
 # --- Barra Lateral (Sidebar) ---
 with st.sidebar:
@@ -46,37 +49,92 @@ with st.sidebar:
     st.divider()
     
     st.subheader("🛠 Dados para Teste")
-    st.markdown("**Cliente 1 (Score Baixo):**")
-    st.code("CPF: 12345678900\nNasc: 1990-01-01", language="text")
+    st.markdown("**Cliente 1 (Score 750):**")
+    st.code("CPF: 12345678901\nNasc: 1995-02-13", language="text")
     
-    st.markdown("**Cliente 2 (Score Alto):**")
-    st.code("CPF: 11122233344\nNasc: 1985-05-20", language="text")
+    st.markdown("**Cliente 2 (Score 680):**")
+    st.code("CPF: 98765432100\nNasc: 1996-08-16", language="text")
+    
+    st.markdown("**Cliente 3 (Score 720):**")
+    st.code("CPF: 11122233344\nNasc: 2000-11-07", language="text")
     
     st.divider()
     
+    def close_ws_connection():
+        ws = st.session_state.get("ws")
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+            finally:
+                st.session_state.ws = None
+
     if st.button("🗑 Limpar Histórico", type="primary"):
+        close_ws_connection()
         st.session_state.messages = []
         # Gera novo ID para garantir que o backend "esqueça" o contexto anterior
         st.session_state.client_id = str(uuid.uuid4())
         st.rerun()
 
+    if st.button("🔌 Reconectar WebSocket"):
+        close_ws_connection()
+        st.experimental_rerun()
+
 # --- Cabeçalho Principal ---
-st.title("🏦 Banco Ágil")
-st.caption("Atendimento Inteligente com Agentes de IA | Powered by Agno & Gemini")
+# --- Configuração dinâmica do backend ---
+BACKEND_WS_BASE = os.getenv("BACKEND_WS_URL", "ws://localhost:8000/chat/ws").rstrip("/")
+STREAM_END_TOKEN = os.getenv("STREAM_END_TOKEN", "__STREAM_END__")
 
 # --- Lógica de Comunicação WebSocket ---
-async def send_message_to_agent(message: str, client_id: str):
-    """Conecta ao WebSocket do FastAPI, envia msg e aguarda resposta."""
-    uri = f"ws://localhost:8000/chat/ws/{client_id}"
+def _ensure_ws_connection(client_id: str):
+    uri = f"{BACKEND_WS_BASE}/{client_id}"
+    ws = st.session_state.get("ws")
+    if ws is not None:
+        return ws
     try:
-        async with websockets.connect(uri) as websocket:
-            await websocket.send(message)
-            response = await websocket.recv()
-            return response
+        # Aumentar timeout para dar tempo ao Team Agno inicializar
+        ws = connect(uri, open_timeout=15)
+        st.session_state.ws = ws
+        return ws
     except ConnectionRefusedError:
         return "ERRO: Não foi possível conectar ao servidor. Verifique se o FastAPI está rodando."
+    except Exception as exc:
+        return f"ERRO: Falha ao abrir o WebSocket ({exc})."
+
+
+def _receive_stream(ws):
+    """Lê os chunks enviados pelo backend até encontrar o token de término."""
+    chunks = []
+    try:
+        while True:
+            data = ws.recv()
+            if data == STREAM_END_TOKEN:
+                break
+            if data and data.strip():
+                chunks.append(data)
     except Exception as e:
-        return f"ERRO: {str(e)}"
+        if chunks:  # Se já recebeu algo, retorna o que tiver
+            return chunks
+        return [f"ERRO: Falha na comunicação ({e})"]
+    return chunks
+
+
+def send_message_to_agent(message: str, client_id: str):
+    """Reaproveita a mesma conexão WebSocket enquanto o usuário estiver na página."""
+    ws = _ensure_ws_connection(client_id)
+    if isinstance(ws, str):  # mensagem de erro
+        return ws
+
+    try:
+        ws.send(message)
+        return _receive_stream(ws)
+    except ConnectionClosed as exc:
+        st.session_state.ws = None
+        return f"ERRO: Conexão encerrada pelo servidor ({exc}). Clique em 'Reconectar WebSocket' e tente novamente."
+    except Exception as exc:
+        st.session_state.ws = None
+        return f"ERRO: Falha ao usar o WebSocket ({exc})."
 
 # --- Exibição do Histórico de Chat ---
 for message in st.session_state.messages:
@@ -95,11 +153,17 @@ if prompt := st.chat_input("Digite sua mensagem aqui..."):
     # 2. Mostra spinner enquanto aguarda o Agente
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("Processando solicitação..."):
-            # Chama a função async dentro do loop do Streamlit
-            response_text = asyncio.run(
-                send_message_to_agent(prompt, st.session_state.client_id)
-            )
-            st.markdown(response_text)
-            
+            resposta = send_message_to_agent(prompt, st.session_state.client_id)
+
+            if isinstance(resposta, str):
+                st.markdown(resposta)
+                response_text = resposta
+            else:
+                response_text = ""
+                placeholder = st.empty()
+                for chunk in resposta:
+                    response_text += chunk
+                    placeholder.markdown(response_text)
+
     # 3. Guarda resposta do assistente
     st.session_state.messages.append({"role": "assistant", "content": response_text})
