@@ -237,7 +237,7 @@ def criar_agente_entrevista_credito(session_id: str) -> Agent:
         tools=[atualizar_score, verificar_auth],
         markdown=True,
         add_history_to_context=True,
-        num_history_runs=15,
+        num_history_runs=20,
         instructions= dedent("""\
     ## IDENTIDADE
     Você é o Consultor de Análise de Crédito do Banco Ágil.
@@ -342,7 +342,7 @@ def criar_agente_cambio(session_id: str) -> Agent:
         tools=[TavilyTools(), verificar_auth],
         markdown=True,
         add_history_to_context=True,
-        num_history_runs=5,
+        num_history_runs=10,
         instructions= dedent("""\
     ## IDENTIDADE
     Você é o Especialista em Câmbio do Banco Ágil.

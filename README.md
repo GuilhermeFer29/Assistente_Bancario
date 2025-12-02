@@ -152,9 +152,9 @@ Este padrão garante:
 ### 1. 🔐 Autenticação Segura
 
 - Validação de CPF (11 dígitos) + Data de Nascimento
-- Suporte a entrada de dados separados ou juntos
+- Suporte a entrada de dados separados ou juntos (Cliente pode enviar CPF e Data em mensagens distintas)
 - **Limite de 3 tentativas** com bloqueio automático
-- Persistência de dados parciais na sessão (CPF/Data pendente)
+- Persistência de dados parciais na sessão (CPF/Data pendente são salvos em uma variavel de estado por sessão)
 
 ```
 Fluxo de Autenticação:
@@ -177,7 +177,7 @@ Fluxo de Autenticação:
 - Aprovação automática se dentro da faixa permitida
 - Sugestão de entrevista quando negado
 
-**Tabela de Limites por Score:**
+**Tabela de Limites por Score:** (valores fictícios para demonstração que esta nos CSV)
 
 | Score | Limite Máximo |
 |-------|---------------|
@@ -196,7 +196,7 @@ Coleta 5 informações financeiras para recalcular o score:
 4. **Número de dependentes** (0, 1, 2 ou 3+)
 5. **Possui dívidas ativas** (Sim/Não)
 
-**Fórmula do Score:**
+**Fórmula do Score:** ( com base no desafio proposto )
 ```
 score = (renda / (despesas + 1)) × 30 
       + bonus_emprego 
@@ -231,19 +231,18 @@ score = (renda / (despesas + 1)) × 30
 
 ### Desafio 1: Persistência de Dados de Autenticação
 
-**Problema:** O modelo perdia o CPF informado quando o cliente enviava a data de nascimento em uma mensagem separada.
+**Problema:** O modelo perdia o CPF informado quando o cliente enviava a data de nascimento em uma mensagem separada e reiniciava a conversa .
 
-**Solução:** Criação de ferramentas específicas com estado de sessão:
+**Solução:** Criação de ferramentas específicas com estado de sessão, que nos permitiu salvar em variaveis de estado os dados parciais e autenticar quando ambos estivessem presentes.
 
 ```python
-# Estado persistido por sessão
+# Aqui estamos persistindo os dados e salvando ele em um dicionário global por sessão
 session_states[session_id] = {
     "cpf_pendente": None,
     "data_nascimento_pendente": None,
-    # ...
 }
 
-# Ferramenta que salva CPF e verifica se pode autenticar
+# Criada uma ferramenta para registrar o CPF do cliente
 def registrar_cpf(cpf: str) -> str:
     state["cpf_pendente"] = cpf
     if state["data_nascimento_pendente"]:
@@ -254,12 +253,13 @@ def registrar_cpf(cpf: str) -> str:
 
 ### Desafio 2: Formatação de Respostas (Listas e Valores)
 
-**Problema:** Os bullet points apareciam na mesma linha, valores monetários não formatados corretamente.
+**Problema:** Os bullet points apareciam na mesma linha, valores monetários não formatados corretamente, textos quebrados.
 
 **Solução:** 
-1. Instruções explícitas de formatação para cada agente
+1. Instruções explícitas de formatação para cada agente 
 2. Função auxiliar `_formatar_reais()` para valores monetários
 3. Uso de hífens `-` em vez de bullets `•` para compatibilidade Markdown
+4. Ajustes no frontend Streamlit para renderização correta fazendo a formatação da resposta recebida do modelo (Gemini).
 
 ```python
 def _formatar_reais(valor: float) -> str:
@@ -267,43 +267,53 @@ def _formatar_reais(valor: float) -> str:
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 ```
 
-### Desafio 3: Sobrescrita de CSVs no Docker
+### Desafio 3: Tratamento de erros de API 
 
-**Problema:** Os arquivos CSV eram recriados a cada restart do container, perdendo dados.
+**Problema:** Comunicação entre a API do Google que retornava os erros (429 -> limite, 404 -> não encontrado).
 
-**Solução:** Verificação de existência antes de gerar:
+**Solução:** Ter um tratamento de erro ao processar a mensagem, que quando ele processava a mensagem e recebia um erro da API, ele retornava uma mensagem amigável ao usuário e conexao e fechada na interface.
 
 ```python
-# scripts/gerador_csv.py
-if not os.path.exists(CSV_PATH):
-    gerar_dados_iniciais()
-else:
-    print("CSV já existe, mantendo dados.")
+# agent/agents.py
+except Exception as e:
+        error_str = str(e).lower()
+        # Tratar erros específicos da API
+        if "no response from" in error_str:
+            error_msg = "Desculpe, não consegui processar sua solicitação. Poderia reformular ou tentar novamente?"
+        elif "500" in error_str or "internal" in error_str:
+            error_msg = "O serviço está temporariamente indisponível. Por favor, tente novamente em alguns segundos."
+        elif "429" in error_str or "rate" in error_str:
+            error_msg = "Muitas solicitações. Por favor, aguarde um momento e tente novamente."
+        elif "401" in error_str or "403" in error_str or "unauthorized" in error_str:
+            error_msg = "Erro de configuração do sistema. Entre em contato com o suporte."
+        else:
+            error_msg = "Desculpe, não foi possível processar sua solicitação. Tente novamente."
+        return False, error_msg
 ```
 
 ### Desafio 4: Contexto Entre Mensagens (Histórico)
 
-**Problema:** O agente não lembrava de informações anteriores da conversa.
+**Problema:** O agente não lembrava de informações anteriores da conversa e nao avia persistência de histórico e estado da sessão.
 
-**Solução:** Configuração correta do Agno:
+**Solução:** Configuração correta do Agno, a criação do banco SQLite para persistência automática do histórico e estado da sessão.
 
 ```python
 Agent(
     add_history_to_context=True,  # Inclui histórico no prompt
-    num_history_runs=10,           # Últimas 10 interações
+    num_history_runs=10,           # Ajustavel conforme necessidade
 )
 
 Team(
     share_member_interactions=True,  # Compartilha entre agentes
-    db=SqliteDb(db_file="..."),      # Persiste em SQLite
+    db=SqliteDb(db_file="..."),      # Persiste em banco de dados SQLite
 )
 ```
 
 ### Desafio 5: Roteamento para Agente Correto
 
-**Problema:** O coordenador às vezes enviava para o agente errado ou respondia diretamente.
+**Problema:** O coordenador às vezes enviava para o agente errado ou assumia a responsabilidade.
 
-**Solução:** Instruções detalhadas de roteamento com matriz de decisão:
+**Solução:** Instruções detalhadas de roteamento com matriz de decisão e palavras-chave para cada agente especializado quanto mais específico melhor.
 
 ```python
 instructions = """
@@ -329,7 +339,7 @@ instructions = """
 
 **Problema:** O agente respondia literalmente `[NOME]` em vez do nome do cliente.
 
-**Solução:** Uso de placeholders `{nome}`, `{score}`, `{limite}` com instruções claras de que são valores do retorno das ferramentas:
+**Solução:** Uso de placeholders `{nome}`, `{score}`, `{limite}` com instruções claras de que são valores do retorno das ferramentas para os agentes substituírem na resposta final, para evitar confusão.
 
 ```python
 instructions = """
@@ -343,6 +353,7 @@ Use {nome} (valor real do retorno) na sua resposta.
 ## 🔧 Escolhas Técnicas e Justificativas
 
 ### Framework de Agentes: Agno v2.3.4
+O Agno foi escolhido por sua arquitetura robusta de multi-agentes, facilidade na criação de Teams e integração com modelos de linguagem modernos, e sua facilidade em criar ferramentas com docstrings claras, que facilitou a implementação das funcionalidades bancárias.
 
 | Critério | Justificativa |
 |----------|---------------|
@@ -351,7 +362,9 @@ Use {nome} (valor real do retorno) na sua resposta.
 | **Histórico** | Persistência automática em SQLite |
 | **Modelos** | Integração com Gemini, OpenAI, etc. |
 
+
 ### Modelo de IA: Gemini 2.0 Flash Lite
+Foi escolhido o Gemini 2.0 Flash Lite por sua capacidade de fornecer respostas rápidas e de alta qualidade, essenciais para um assistente bancário que requer precisão e consistência nas interações com os clientes, e na sua disponibilidade via API GRATUITA tendo um RPM(Requisição por minuto) de 30 e um TPM (Tokens por minuto) de 1M e um RPD(Requisições por dia) de 200.
 
 | Critério | Justificativa |
 |----------|---------------|
@@ -362,6 +375,8 @@ Use {nome} (valor real do retorno) na sua resposta.
 
 ### Backend: FastAPI
 
+Foi escolhido o FastAPI por sua alta performance, suporte nativo a WebSockets, facilidade de criação de APIs RESTful e documentação automática via Swagger, o que agilizou o desenvolvimento e testes da API do assistente bancário, nos fornecendo uma redução significativa no tempo de desenvolvimento, pois suas ferramentas nativas facilitam a criação de endpoints e a integração com o Agno.
+
 | Critério | Justificativa |
 |----------|---------------|
 | **WebSocket** | Suporte nativo para chat em tempo real |
@@ -370,6 +385,8 @@ Use {nome} (valor real do retorno) na sua resposta.
 | **Docs** | Swagger automático |
 
 ### Frontend: Streamlit
+
+Streamlit foi escolhido por sua simplicidade na criação de interfaces web interativas, especialmente para aplicações de chat. Sua capacidade de renderizar componentes nativos de chat e personalizar o tema com CSS facilitou a criação de uma interface amigável e responsiva para o assistente bancário.
 
 | Critério | Justificativa |
 |----------|---------------|
@@ -380,6 +397,8 @@ Use {nome} (valor real do retorno) na sua resposta.
 
 ### Armazenamento: CSV + SQLite
 
+Os dados dos clientes e solicitações foram armazenados em arquivos CSV pela sua simplicidade e facilidade de edição manual para demonstração (Conforme Solicitado). Já as sessões do Agno foram persistidas em SQLite para garantir robustez e integridade dos dados das sessões e histórico de interações.
+
 | Dado | Formato | Justificativa |
 |------|---------|---------------|
 | Clientes | CSV | Fácil edição manual, demonstração |
@@ -387,6 +406,8 @@ Use {nome} (valor real do retorno) na sua resposta.
 | Sessões Agno | SQLite | Persistência robusta do framework |
 
 ### Containerização: Docker Compose
+
+Foi escolhhido o Ambiente Docker Compose para facilitar a implantação e execução do sistema em qualquer máquina, garantindo consistência no ambiente de desenvolvimento e produção, além de simplificar a gestão dos serviços backend e frontend em contêineres separados, para melhor organização e escalabilidade, permitindo que qualquer usuário possa rodar o assistente bancário localmente com poucos comandos.
 
 | Benefício | Descrição |
 |-----------|-----------|
@@ -401,9 +422,9 @@ Use {nome} (valor real do retorno) na sua resposta.
 
 ### Pré-requisitos
 
-- **Docker** e **Docker Compose** instalados
-- Chave de API do **Google Gemini**
-- (Opcional) Chave da **Tavily** para cotações de câmbio
+- **Docker** e **Docker Compose** instalados na máquina (https://hub.docker.com/)
+- Chave de API do **Google Gemini** (https://aistudio.google.com/api-keys)
+- (Opcional) Chave da **Tavily** para cotações de câmbio(https://app.tavily.com/home)
 
 ### Passo a Passo
 
@@ -427,7 +448,7 @@ nano .env
 Conteúdo do `.env`:
 ```env
 GOOGLE_API_KEY=sua_chave_gemini_aqui
-TAVILY_API_KEY=sua_chave_tavily_aqui  # opcional
+TAVILY_API_KEY=sua_chave_tavily_aqui  
 ```
 
 #### 3. Execute com Docker Compose
@@ -608,15 +629,7 @@ def test_validando_cliente_sucesso(tools_module):
     assert resultado["status"] == "ok"
     assert resultado["nome"] == "Cliente Teste"  # Nome da fixture
 ```
-
 ---
-
-## 📄 Licença
-
-Este projeto foi desenvolvido como parte de um desafio técnico.
-
----
-
 ## 👨‍💻 Autor
 
 **Guilherme Fernandes**
