@@ -35,6 +35,8 @@ O **Banco Ágil** é um assistente bancário virtual desenvolvido com arquitetur
 - **Consulta e solicitação de limite de crédito**
 - **Entrevista de crédito** para atualização de score
 - **Consulta de cotações de câmbio** em tempo real
+- **Interface de chat moderna** com Streamlit
+- **Persistência de sessão via websocket e SQLite** com FastAPI
 
 ### Objetivos do Projeto
 
@@ -588,10 +590,26 @@ Assistente_Bancario/
 
 ## 🧪 Testes
 
-### Executar Todos os Testes
+### Executar Testes via Docker (Recomendado)
 
 ```bash
-# Com pytest
+# Testes unitários (rápidos, sem dependência de API externa)
+docker compose --profile test run --rm tests
+
+# Testes de integração (requer GOOGLE_API_KEY, com delays para rate limit)
+docker compose --profile test-integration run --rm tests-integration
+
+# Todos os testes (unitários + integração)
+docker compose --profile test-all run --rm tests-all
+```
+
+### Executar Testes Localmente
+
+```bash
+# Testes unitários
+pytest tests/ -v -m "not integration"
+
+# Todos os testes
 pytest tests/ -v
 
 # Com cobertura
@@ -600,12 +618,28 @@ pytest tests/ --cov=. --cov-report=html
 
 ### Estrutura de Testes
 
-| Arquivo | Cobertura |
-|---------|-----------|
-| `test_tools.py` | Validação de cliente, cálculo de score, limites |
-| `test_agents.py` | Criação de agentes, processamento de mensagens |
-| `test_api.py` | Endpoints REST, WebSocket |
-| `test_streaming.py` | Respostas em stream |
+| Arquivo | Módulos Cobertos | Qtd Testes |
+|---------|------------------|------------|
+| `test_services.py` | `services/clientes.py`, `websocket_manager.py` | 18 |
+| `test_ferramentas_agentes.py` | `tools/ferramentas_agentes.py` | 18 |
+| `test_agents.py` | `agent/agents.py` (Team, agentes, sessão) | 14 |
+| `test_tools.py` | `tools/tools.py` (validação, score, limite) | 7 |
+| `test_middleware.py` | `middlwares/login_conexao.py` | 3 |
+| `test_api.py` | `main.py`, `routes/chat_rotas.py` | 3 |
+| `test_streaming.py` | WebSocket streaming E2E | 1 |
+
+**Total: 71 testes (69 unitários + 2 de integração)**
+
+### Cobertura por Camada
+
+| Camada | Componentes Testados |
+|--------|---------------------|
+| **Services** | `limpar_cpf`, `normalizar_data`, `buscar_cliente_por_cpf`, `atualizar_limite_cliente`, `atualizar_score_cliente`, `obter_limite_permitido_por_score`, `registrar_solicitacao_limite`, `WebsocketManager` |
+| **Tools** | `validando_cliente`, `consultando_limite`, `solicitacao_de_limite`, `atualizar_score_cliente` |
+| **Ferramentas Agentes** | `registrar_cpf`, `registrar_data_nascimento`, `autenticar_cliente`, `verificar_autenticacao`, `consultar_limite_credito`, `solicitar_aumento_limite`, `atualizar_score_apos_entrevista`, `session_state` |
+| **Agents** | `criar_agente_triagem`, `criar_agente_credito`, `criar_agente_entrevista`, `criar_agente_cambio`, `criar_time_banco_agil`, `get_team`, `limpar_sessao`, `processar_mensagem` |
+| **Middleware** | `LoginConexaoMiddleware` (headers, tempo de processamento) |
+| **API** | Rota home, conexão WebSocket, streaming |
 
 ### Exemplo de Teste
 
@@ -615,7 +649,6 @@ pytest tests/ --cov=. --cov-report=html
 # conftest.py - Fixture cria dados de teste isolados
 @pytest.fixture
 def csv_environment(tmp_path, monkeypatch):
-    # Cria ambiente isolado em diretório temporário
     data_dir = tmp_path / "data"
     monkeypatch.setenv("AGNO_DATA_DIR", str(data_dir))
     # Popula CSVs com dados de teste
@@ -623,11 +656,27 @@ def csv_environment(tmp_path, monkeypatch):
         {"cpf": "12345678901", "nome": "Cliente Teste", ...}
     ]).to_csv(...)
 
-# test_tools.py - Usa dados da fixture
-def test_validando_cliente_sucesso(tools_module):
-    resultado = tools_module.validando_cliente("123.456.789-01", "13/02/1995")
-    assert resultado["status"] == "ok"
-    assert resultado["nome"] == "Cliente Teste"  # Nome da fixture
+# test_ferramentas_agentes.py - Testa ferramentas de sessão
+def test_autenticar_sucesso(session_id, csv_environment):
+    autenticar = criar_ferramenta_autenticacao(session_id)
+    resultado = autenticar("12345678901", "13/02/1995")
+    
+    state = get_session_state(session_id)
+    assert state["autenticado"] is True
+    assert "SUCESSO" in resultado
+```
+
+### Testes de Integração
+
+Os testes marcados com `@pytest.mark.integration` requerem a API do Gemini e incluem delays automáticos de 2 segundos entre chamadas para evitar rate limiting (429).
+
+```python
+@pytest.mark.skipif(not HAS_API_KEY, reason="Requer GOOGLE_API_KEY")
+@pytest.mark.integration
+def test_websocket_streaming_flow():
+    # Testa fluxo completo com delays entre mensagens
+    resposta = _send_and_collect(websocket, "Oi", delay=2)
+    ...
 ```
 ---
 ## 👨‍💻 Autor

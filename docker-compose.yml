@@ -12,3 +12,45 @@ services:
     ports:
       - "8000:8000"
       - "8501:8501"
+
+  # Serviço para executar testes unitários (sem API externa)
+  tests:
+    build: .
+    container_name: banco_agil_tests
+    env_file:
+      - .env
+    environment:
+      - AGNO_DATA_DIR=/app/data_test
+    volumes:
+      - ./tests:/app/tests
+    entrypoint: ["pytest", "tests/", "-v", "--tb=short", "-m", "not integration"]
+    profiles:
+      - test
+
+  # Serviço para executar testes de integração (requer API)
+  tests-integration:
+    build: .
+    container_name: banco_agil_tests_integration
+    env_file:
+      - .env
+    environment:
+      - AGNO_DATA_DIR=/app/data_test
+    volumes:
+      - ./tests:/app/tests
+    entrypoint: ["pytest", "tests/", "-v", "--tb=short", "-m", "integration"]
+    profiles:
+      - test-integration
+
+  # Serviço para executar todos os testes
+  tests-all:
+    build: .
+    container_name: banco_agil_tests_all
+    env_file:
+      - .env
+    environment:
+      - AGNO_DATA_DIR=/app/data_test
+    volumes:
+      - ./tests:/app/tests
+    entrypoint: ["pytest", "tests/", "-v", "--tb=short"]
+    profiles:
+      - test-all

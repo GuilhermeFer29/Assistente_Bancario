@@ -14,11 +14,12 @@ import pandas as pd
 
 _DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _DATA_DIR = Path(os.getenv("AGNO_DATA_DIR", str(_DEFAULT_DATA_DIR)))
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
 _CLIENTES_CSV = _DATA_DIR / "clientes.csv"
 _SOLICITACOES_CSV = _DATA_DIR / "solicitacoes_aumento_limite.csv"
 _SCORES_CSV = _DATA_DIR / "score_credito_base.csv"
 _LOCK_DIR = _DATA_DIR / ".locks"
-_LOCK_DIR.mkdir(exist_ok=True)
+_LOCK_DIR.mkdir(parents=True, exist_ok=True)
 
 _CLIENTES_COLS = [
     "cpf",
