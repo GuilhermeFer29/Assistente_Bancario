@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from typing import Any, Dict
-
 from services import (
     atualizar_limite_cliente,
     atualizar_score_cliente as atualizar_score_csv,
@@ -11,7 +9,6 @@ from services import (
     obter_limite_permitido_por_score,
     registrar_solicitacao_limite,
 )
-
 
 def _normalizar_texto(valor: str) -> str:
     if not isinstance(valor, str):
@@ -35,7 +32,6 @@ def _normalizar_texto(valor: str) -> str:
         texto = texto.replace(antigo, novo)
     return texto
 
-
 def validando_cliente(cpf: str, dt_nascimento: str) -> Dict[str, Any]:
     cpf_limpo = limpar_cpf(cpf)
     data = normalizar_data(dt_nascimento)
@@ -52,7 +48,6 @@ def validando_cliente(cpf: str, dt_nascimento: str) -> Dict[str, Any]:
         "mensagem": f"Cliente autenticado: {cliente['nome']} (score {cliente['score_credito']}).",
     }
 
-
 def consultando_limite(cpf: str) -> Dict[str, Any]:
     cpf_limpo = limpar_cpf(cpf)
     cliente = buscar_cliente_por_cpf(cpf_limpo)
@@ -67,7 +62,6 @@ def consultando_limite(cpf: str) -> Dict[str, Any]:
         "limite_atual": cliente["limite_credito"],
         "mensagem": f"Limite atual disponível: R$ {cliente['limite_credito']:.2f}.",
     }
-
 
 def solicitacao_de_limite(cpf: str, novo_limite: float) -> Dict[str, Any]:
     cpf_limpo = limpar_cpf(cpf)
@@ -138,7 +132,17 @@ def atualizar_score_cliente(
     dependentes: int,
     tem_dividas: str,
 ) -> Dict[str, Any]:
+    """
+    Calcula o score de crédito conforme fórmula do desafio:
+    score = (renda_mensal / (despesas + 1)) * peso_renda +
+            peso_emprego[tipo_emprego] +
+            peso_dependentes[num_dependentes] +
+            peso_dividas[tem_dividas]
+    """
+    # Pesos conforme especificação do desafio
+    PESO_RENDA = 30
     peso_emprego = {"formal": 300, "autonomo": 200, "desempregado": 0}
+    peso_dependentes = {0: 100, 1: 80, 2: 60}  # 3+ = 30
     peso_dividas = {"sim": -100, "nao": 100}
 
     try:
@@ -173,8 +177,10 @@ def atualizar_score_cliente(
             "mensagem": "Informe se possui dívidas: 'sim' ou 'nao'.",
         }
 
-    termo_financeiro = (renda_float / (despesas_float + 1)) * 30
-    dependentes_bonus = {0: 100, 1: 80, 2: 60}.get(dependentes_int, 30)
+    # Fórmula conforme especificação do desafio
+    termo_financeiro = (renda_float / (despesas_float + 1)) * PESO_RENDA
+    bonus_dependentes = peso_dependentes.get(dependentes_int, 30)  # 3+ = 30
+    
     novo_score = int(
         min(
             1000,
@@ -182,8 +188,8 @@ def atualizar_score_cliente(
                 0,
                 termo_financeiro
                 + peso_emprego[emprego_normalizado]
-                + peso_dividas[dividas_normalizado]
-                + dependentes_bonus,
+                + bonus_dependentes
+                + peso_dividas[dividas_normalizado],
             ),
         )
     )
@@ -209,13 +215,3 @@ def atualizar_score_cliente(
         "mensagem": f"Score atualizado com sucesso! Novo score: {novo_score}.",
         "novo_score": novo_score,
     }
-
-
-
-
-
-
-
-    
-
-    

@@ -1,329 +1,556 @@
-import re
+"""
+Agentes Bancários do Banco Ágil - Arquitetura de Time de Agentes Especializados
+
+"""
+from textwrap import dedent
 from agno.agent import Agent
+from agno.team.team import Team
 from agno.models.google import Gemini
 from agno.tools.tavily import TavilyTools
 from agno.db.sqlite import SqliteDb
 from dotenv import load_dotenv
-from tools import tools
 from typing import Dict, Tuple
 
-MAX_AUTH_ATTEMPTS = 3
+# Importar ferramentas da pasta tools
+from tools.ferramentas_agentes import (
+    criar_ferramenta_autenticacao,
+    criar_ferramenta_verificar_auth,
+    criar_ferramenta_registrar_cpf,
+    criar_ferramenta_registrar_data_nascimento,
+    criar_ferramenta_consultar_limite,
+    criar_ferramenta_solicitar_limite,
+    criar_ferramenta_entrevista_credito,
+    limpar_estado_sessao,
+)
 
 load_dotenv()
 
-model = Gemini(id="gemini-2.5-flash-lite", temperature=0.3)
+# Modelo configurado para todos os agentes
+model = Gemini(id="gemini-2.0-flash-lite", temperature=0.2)
+
+# Database para persistência de sessões do Team
 db = SqliteDb(db_file="data/agno_sessions.db")
 
-# Dicionário para armazenar o estado de autenticação por sessão
-session_states: Dict[str, Dict] = {}
+# AGENTE DE TRIAGEM - AUTENTICAÇÃO
 
-
-def _get_session_state(session_id: str) -> Dict:
-    """Garante que cada sessão tenha um dicionário inicial padrão."""
-    if session_id not in session_states:
-        session_states[session_id] = {
-            'erros': 0,
-            'bloqueado': False,
-            'authenticated': False,
-            'cpf': None,
-            'dt_nascimento': None,
-            'nome_cliente': "Cliente",
-            'score_credito': None,
-            'ultimo_limite': None,
-            'last_agent': None,
-        }
-    return session_states[session_id]
-
-
-def _format_team_response(run_response, stream_enabled: bool) -> Tuple[bool, object]:
-    if stream_enabled:
-        return True, run_response
-    return False, str(run_response.content)
-
-
-def get_auth_tool_for_session(session_id: str):
-    """Feramenta de validação de cliente com controle de tentativas por sessão."""
-    _get_session_state(session_id)
-
-    def validar_cliente_com_seguranca(cpf: str, data_nascimento: str) -> str:
-        state = _get_session_state(session_id)
-
-        if state['bloqueado'] or state['erros'] >= 3:
-            return "SISTEMA: Acesso BLOQUEADO por excesso de tentativas. O atendimento deve ser encerrado imediatamente."
-
-        try:
-            resultado = tools.validando_cliente(cpf, data_nascimento)
-        except AttributeError:
-            return "Erro técnico: Função de validação não encontrada no tools.py"
-        except Exception as exc:  # salvaguarda
-            return f"Erro ao validar cliente: {exc}"
-
-        # Compatibilidade com retornos legados em string
-        if not isinstance(resultado, dict):
-            texto = str(resultado)
-            if any(palavra in texto for palavra in ["FALHA", "Erro", "não", "Não"]):
-                state['erros'] += 1
-                tentativas_restantes = 3 - state['erros']
-                if state['erros'] >= 3:
-                    state['bloqueado'] = True
-                    return "FALHA FINAL: Você excedeu o número máximo de 3 tentativas. O sistema bloqueou o acesso. Encerre o atendimento."
-                return f"FALHA: Dados incorretos. Você tem mais {tentativas_restantes} tentativas."
-
-            state['cpf'] = cpf
-            state['dt_nascimento'] = data_nascimento
-            state['authenticated'] = True
-            state['erros'] = 0
-            state['bloqueado'] = False
-            state['nome_cliente'] = state.get('nome_cliente') or "Cliente"
-            return texto
-
-        status = resultado.get('status')
-        mensagem = resultado.get('mensagem', 'Autenticação processada.')
-
-        if status != 'ok':
-            state['erros'] += 1
-            tentativas_restantes = max(0, 3 - state['erros'])
-            if state['erros'] >= MAX_AUTH_ATTEMPTS:
-                state['bloqueado'] = True
-                return (
-                    mensagem
-                    + " O acesso foi bloqueado após três tentativas. Encerre o atendimento."
-                )
-            return f"{mensagem} Você ainda possui {tentativas_restantes} tentativa(s)."
-
-        state['cpf'] = cpf
-        state['dt_nascimento'] = data_nascimento
-        state['authenticated'] = True
-        state['erros'] = 0
-        state['bloqueado'] = False
-        state['nome_cliente'] = resultado.get('nome', 'Cliente') or 'Cliente'
-        state['score_credito'] = resultado.get('score_credito')
-
-        return mensagem
-
-    return validar_cliente_com_seguranca
-
-def criar_agente_coordenador(session_id: str) -> Agent:
-    ferramenta_validacao_segura = get_auth_tool_for_session(session_id)
+def criar_agente_triagem(session_id: str) -> Agent:
+    """Agente responsável EXCLUSIVAMENTE pela autenticação do cliente."""
     
-    # Especialista em câmbio - seguindo pattern Agno
-    cambio_search_agent = Agent(
-        name="CurrencyExchangeAgent",
-        role="Especialista em câmbio fornecendo cotações em tempo real e análise de mercado",
-        tools=[TavilyTools()],
-        instructions=[
-            "Você é um especialista em câmbio do Banco Ágil.",
-            "Sempre pesquise cotações atuais usando suas ferramentas.",
-            "Forneça informações claras e concisas sobre valores de moedas e datas.",
-            "Sugira serviços relacionados quando apropriado.",
-            "Formate respostas em markdown para melhor legibilidade."
-        ],
+    autenticar = criar_ferramenta_autenticacao(session_id)
+    verificar_auth = criar_ferramenta_verificar_auth(session_id)
+    registrar_cpf = criar_ferramenta_registrar_cpf(session_id)
+    registrar_data = criar_ferramenta_registrar_data_nascimento(session_id)
+    
+    return Agent(
+        id="triagem",
+        name="Triagem",
+        role="Responsável pela autenticação segura de clientes usando CPF e data de nascimento. Primeiro contato do cliente. Lida com saudações e identificação.",
+        description="Agente de autenticação e boas-vindas do Banco Ágil. Valida identidade através de CPF (11 dígitos) e data de nascimento. Controla tentativas de login e bloqueio por segurança.",
         model=model,
+        tools=[autenticar, verificar_auth, registrar_cpf, registrar_data],
         markdown=True,
-    )
-
-    # Especialista em entrevista de crédito - seguindo pattern Agno
-    entrevistador_credito_agent = Agent(
-        name="CreditInterviewAgent", 
-        role="Especialista em avaliação de crédito conduzindo entrevistas financeiras e pontuação",
-        tools=[tools.atualizar_score_cliente],
-        instructions=[
-            "Você é um especialista em avaliação de crédito do Banco Ágil.",
-            "Conduza entrevistas financeiras estruturadas cobrindo: renda, despesas, emprego, dependentes e dívidas.",
-            "Use dados do cliente do contexto quando disponível para evitar perguntas redundantes.",
-            "Só chame a ferramenta de atualização de score após coletar todas as informações necessárias.",
-            "Após atualizações de score, explique claramente o novo score e próximos passos.",
-            "Mantenha tom profissional mas conversacional durante todo o processo."
-        ],
-        model=model,
-        markdown=True,
-    )
-
-    # Especialista em crédito - seguindo pattern Agno
-    analise_credito_agent = Agent(
-        name="CreditManagementAgent",
-        role="Gestor de limites de crédito tratando consultas e solicitações de aumento",
-        tools=[
-            tools.validando_cliente,
-            tools.consultando_limite,
-            tools.solicitacao_de_limite,
-        ],
-        instructions=[
-            "Você é um gestor de crédito do Banco Ágil.",
-            "CONTEXTO: Cliente já está autenticado. Use CPF/Data do contexto para ferramentas.",
-            "",
-            "FLUXO CONVERSACIONAL:",
-            "1. Para consultas de limite: consulte e informe valor atual",
-            "2. Para aumentos: informe limite atual, explique regras de score, pergunte se deseja prosseguir",
-            "3. Se cliente confirmar (sim/quero/confirmar): processe solicitação IMEDIATAMENTE",
-            "4. Retorne resultado (aprovado/rejeitado) com próximos passos",
-            "",
-            "IMPORTANTE:",
-            "- Mantenha tom conversacional e profissional",
-            "- Use dados do contexto sem pedir novamente",
-            "- Não repita informações já fornecidas",
-            "- Se cliente disser 'sim' após pergunta de confirmação, processe sem mais perguntas"
-        ],
-        model=model,
-        markdown=True,
-    )
-
-    # Adicionar contador para evitar loops
-    def _check_delegation_loop(session_id: str, max_delegations: int = 3) -> bool:
-        """Verifica se há loop de delegação na sessão."""
-        state = _get_session_state(session_id)
-        delegation_count = state.get('delegation_count', 0)
-        if delegation_count >= max_delegations:
-            return True  # Loop detectado
-        state['delegation_count'] = delegation_count + 1
-        return False
-
-    # Funções delegadas otimizadas
-    def delegar_para_cambio(solicitacao: str) -> str:
-        """Delega solicitações de câmbio para especialista."""
-        # Verificar loop antes de delegar
-        if _check_delegation_loop(session_id):
-            return "Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."
-        
-        print(f"🔍 COORDENADOR: Delegando para agente de câmbio: {solicitacao}")
-        state = _get_session_state(session_id)
-        # Compartilhar estado de autenticação com especialista
-        specialist_session = f"{session_id}-cambio"
-        if state.get('cpf') and state.get('dt_nascimento'):
-            # Copiar estado de autenticação para sessão do especialista
-            session_states[specialist_session] = state.copy()
-        context = ""
-        if state.get('cpf') and state.get('dt_nascimento'):
-            context = f"CONTEXTO DO CLIENTE: Cliente autenticado - CPF: {state['cpf']}, Data Nasc: {state['dt_nascimento']}. "
-        response = cambio_search_agent.run(context + solicitacao, session_id=specialist_session, stream=False)
-        return str(response.content)
-
-    def delegar_para_entrevista(solicitacao: str) -> str:
-        """Delega solicitações de entrevista para especialista."""
-        # Verificar loop antes de delegar
-        if _check_delegation_loop(session_id):
-            return "Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."
-        
-        print(f"🔍 COORDENADOR: Delegando para agente de entrevista: {solicitacao}")
-        state = _get_session_state(session_id)
-        # Compartilhar estado de autenticação com especialista
-        specialist_session = f"{session_id}-interview"
-        if state.get('cpf') and state.get('dt_nascimento'):
-            # Copiar estado de autenticação para sessão do especialista
-            session_states[specialist_session] = state.copy()
-        context = ""
-        if state.get('cpf') and state.get('dt_nascimento'):
-            context = f"CONTEXTO DO CLIENTE: Cliente autenticado - CPF: {state['cpf']}, Data Nasc: {state['dt_nascimento']}. Use estes dados para ferramentas, não peça novamente. "
-        response = entrevistador_credito_agent.run(context + solicitacao, session_id=specialist_session, stream=False)
-        return str(response.content)
-
-    def delegar_para_credito(solicitacao: str) -> str:
-        """Delega solicitações de crédito para especialista."""
-        # Verificar loop antes de delegar
-        if _check_delegation_loop(session_id):
-            return "Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."
-        
-        print(f"🔍 COORDENADOR: Delegando para agente de crédito: {solicitacao}")
-        state = _get_session_state(session_id)
-        # Compartilhar estado de autenticação com especialista
-        specialist_session = f"{session_id}-credit"
-        if state.get('cpf') and state.get('dt_nascimento'):
-            # Copiar estado de autenticação para sessão do especialista
-            session_states[specialist_session] = state.copy()
-        context = ""
-        if state.get('cpf') and state.get('dt_nascimento'):
-            context = f"CONTEXTO DO CLIENTE: Cliente autenticado - CPF: {state['cpf']}, Data Nasc: {state['dt_nascimento']}. Use estes dados para ferramentas, não peça novamente. "
-        response = analise_credito_agent.run(context + solicitacao, session_id=specialist_session, stream=False)
-        return str(response.content)
-
-    # Coordenador principal - seguindo pattern Agno
-    coordenador = Agent(
-        name="BankingCoordinatorAgent",
-        role="Coordenador bancário principal gerenciando solicitações de clientes e delegação de especialistas",
-        description="Você é o coordenador principal dos serviços bancários do Banco Ágil. Analisa solicitações de clientes e delega para especialistas apropriados mantendo conversação contínua.",
-        tools=[
-            ferramenta_validacao_segura,
-            delegar_para_cambio,
-            delegar_para_entrevista,
-            delegar_para_credito,
-        ],
-        instructions=[
-            "Você é o coordenador principal do Banco Ágil, responsável pelo atendimento contínuo ao cliente.",
-            "",
-            "SAUDAÇÃO INICIAL:",
-            "- Se é a primeira mensagem do cliente (histórico vazio), responda: 'Bem-vindo ao Banco Ágil! Para acessar nossos serviços, preciso autenticar você. Por favor, informe seu CPF e data de nascimento (formato: DD/MM/AAAA).'",
-            "- SEMPRE comece com 'Banco Ágil' na saudação",
-            "",
-            "AUTENTICAÇÃO:",
-            "- Se cliente não está autenticado, SEMPRE peça CPF e data de nascimento primeiro",
-            "- Quando cliente fornecer CPF e data → CHAME IMEDIATAMENTE validar_cliente_com_seguranca",
-            "- Após autenticação bem-sucedida → Responda: '✅ Bem-vindo ao Banco Ágil, [nome]! Autenticação confirmada. Como posso ajudar você hoje?'",
-            "",
-            "CONTEXTO CONVERSACIONAL:",
-            "- Mantenha o histórico de conversa em mente",
-            "- Se cliente já foi autenticado, NÃO peça CPF novamente",
-            "- Reconheça quando cliente está continuando uma conversa anterior",
-            "- Se cliente disser 'oi' após já estar autenticado, responda: 'Olá! Bem-vindo de volta ao Banco Ágil. Como posso ajudar?'",
-            "",
-            "REGRAS DE DELEGAÇÃO (IMEDIATAS):",
-            "- Se cliente disser 'limite', 'crédito', 'aumentar', 'consultar' → CHAME IMEDIATAMENTE delegar_para_credito",
-            "- Se cliente disser 'câmbio', 'dólar', 'euro', 'cotação' → CHAME IMEDIATAMENTE delegar_para_cambio", 
-            "- Se cliente disser 'entrevista', 'score', 'renda', 'emprego' → CHAME IMEDIATAMENTE delegar_para_entrevista",
-            "",
-            "IMPORTANTE:",
-            "- NUNCA pergunte 'o que você precisa' se cliente já pediu algo específico",
-            "- SEMPRE chame a ferramenta específica para solicitações de crédito/câmbio/entrevista",
-            "- Mantenha conversação natural e contínua",
-            "- Sempre mencione 'Banco Ágil' nas saudações",
-            "",
-            "CRÍTICO: SEMPRE use uma ferramenta para solicitações específicas. NUNCA responda diretamente sobre crédito/câmbio!"
-        ],
-        model=model,
-        markdown=True,
-        db=db,
-        num_history_messages=10,
         add_history_to_context=True,
-        read_chat_history=True,
-        store_history_messages=True,
+        num_history_runs=10,
+        instructions=dedent("""\
+    ## IDENTIDADE
+    Você é a Assistente Virtual do Banco Ágil, responsável pela autenticação segura de clientes.
+    Seu nome é "Rog".
+    
+    ## FORMATAÇÃO DAS RESPOSTAS - MUITO IMPORTANTE
+    - SEMPRE coloque cada item de lista em uma LINHA SEPARADA
+    - Use duas quebras de linha antes de listas
+    - Formato correto de lista:
+      
+      - Item 1
+      - Item 2
+      - Item 3
+    
+    ## IDIOMA E TOM DE VOZ
+    - SEMPRE responda em Português do Brasil
+    - Use linguagem formal, porém acolhedora e humanizada
+    - Seja objetivo, claro e profissional
+    - Transmita segurança e confiabilidade
+    
+    ## SAUDAÇÃO INICIAL
+    Ao receber "Iniciar", "Olá", "Oi", "Bom dia", "Boa tarde" ou saudações similares:
+    - Cumprimente: "Olá! Seja bem-vindo(a) ao Banco Ágil."
+    - Apresente-se: "Sou o Rog, seu assistente virtual."
+    - Solicite identificação: "Para sua segurança, por favor, informe seu CPF e data de nascimento."
+    
+    ## FLUXO DE AUTENTICAÇÃO - USE AS FERRAMENTAS CORRETAS
+    
+    ### Caso 1: Cliente informou CPF e DATA JUNTOS na mesma mensagem
+    → Use: autenticar_cliente(cpf, data_nascimento)
+    
+    ### Caso 2: Cliente informou APENAS o CPF (11 dígitos)
+    → Use: registrar_cpf(cpf)
+    → Responda pedindo a data de nascimento
+    
+    ### Caso 3: Cliente informou APENAS a data (DD/MM/AAAA)
+    → Use: registrar_data_nascimento(data)
+    → A ferramenta vai autenticar automaticamente se já tiver CPF salvo
+    
+    ## APÓS AUTENTICAÇÃO
+    
+    A ferramenta retorna: "STATUS: SUCESSO. Cliente {nome} autenticado. Score: {score}."
+    Use {nome} e {score} (valores reais do retorno) na sua resposta.
+    
+    ### ✓ Se retorno contém "STATUS: SUCESSO":
+    
+    "Olá, {nome}! É um prazer atendê-lo(a). Seja bem-vindo(a) ao Banco Ágil!
+    
+    Como posso ajudá-lo(a) hoje? Posso auxiliar com:
+    
+    - Consulta e aumento de limite de crédito
+    - Entrevista para melhoria do seu score
+    - Cotações de moedas estrangeiras"
+    
+    ### ✗ Se retorno contém "STATUS: DADOS_INVALIDOS":
+    "Desculpe, os dados não conferem. Você possui {tentativas} tentativa(s) restantes."
+    
+    ### ⚠ Se retorno contém "STATUS: BLOQUEADO":
+    "Acesso bloqueado. Contate: 📞 0800-123-4567"
+    
+    ## REGRAS
+    - NUNCA prossiga sem autenticação completa
+    - SEMPRE use as ferramentas para registrar dados
+"""),
+        expected_output="Saudação profissional com identificação ou confirmação de autenticação bem-sucedida com nome do cliente",
     )
 
-    return coordenador
+# AGENTE DE CRÉDITO - LIMITE
 
-agent_sessions: Dict[str, Agent] = {}
+def criar_agente_credito(session_id: str) -> Agent:
+    """Agente responsável por consultas e solicitações de limite de crédito."""
+    
+    consultar = criar_ferramenta_consultar_limite(session_id)
+    solicitar = criar_ferramenta_solicitar_limite(session_id)
+    verificar_auth = criar_ferramenta_verificar_auth(session_id)
+    
+    return Agent(
+        id="credito",
+        name="Credito",
+        role="Especialista em limite de crédito. Consulta limite atual e processa solicitações de aumento de limite para clientes autenticados.",
+        description="Agente de crédito que consulta e processa alterações de limites. Requer autenticação prévia. Palavras-chave: limite, crédito, aumentar, consultar, cartão.",
+        model=model,
+        tools=[consultar, solicitar, verificar_auth],
+        markdown=True,
+        add_history_to_context=True,
+        num_history_runs=10,
+        instructions= dedent("""\
+    ## IDENTIDADE
+    Você é o Especialista em Crédito do Banco Ágil.
+    Seu papel é auxiliar clientes com consultas e solicitações de limite de crédito.
+    
+    ## FORMATAÇÃO DAS RESPOSTAS - MUITO IMPORTANTE
+    - SEMPRE coloque cada item de lista em uma LINHA SEPARADA
+    - Use duas quebras de linha antes de listas
+    - Formato correto de lista:
+      
+      - Item 1
+      - Item 2
+      - Item 3
+    
+    ## IDIOMA E TOM DE VOZ
+    - SEMPRE responda em Português do Brasil
+    - Use linguagem formal, clara e objetiva
+    - Seja consultivo e orientador
+    - Transmita confiança nas informações financeiras
+    - Formate TODOS os valores monetários como: R$ XX.XXX,XX
+    
+    ## ANTES DE QUALQUER OPERAÇÃO
+    Execute verificar_autenticacao() para obter os dados do cliente.
+    Retorno: "STATUS: AUTENTICADO. Nome: {nome}. CPF: {cpf}. Score: {score}."
+    
+    ### Se NÃO AUTENTICADO:
+    "Para sua segurança, preciso primeiro confirmar sua identidade.
+    Por favor, informe seu CPF e data de nascimento."
+    
+    ## CONSULTA DE LIMITE
+    
+    ### Ao receber: "meu limite", "qual meu limite", "consultar limite", "ver limite"
+    1. Execute verificar_autenticacao() para pegar o nome
+    2. Execute consultar_limite_credito()
+    3. Retorno: "RESULTADO: SUCESSO. O limite de crédito atual do cliente é {limite}."
+    4. Responda:
+    
+    "{nome}, seu limite de crédito atual é de **{limite}**.
+    
+    Este limite está disponível para:
+    
+    - Compras parceladas
+    - Saques
+    - Pagamentos diversos
+    
+    Posso ajudá-lo(a) com mais alguma coisa?"
+    
+    ## SOLICITAÇÃO DE AUMENTO
+    
+    ### Ao receber: "aumentar limite", "quero mais crédito", "solicitar aumento"
+    1. Pergunte o valor desejado:
+    "Qual valor de limite você gostaria de solicitar?"
+    
+    2. Quando informar o valor, execute solicitar_aumento_limite(valor)
+    
+    ### ✓ Se APROVADO:
+    "🎉 Parabéns, {nome}!
+    
+    Sua solicitação foi **APROVADA**!
+    Seu novo limite de crédito é de **{novo_limite}**.
+    
+    O novo limite já está disponível para uso.
+    Agradecemos sua confiança no Banco Ágil!"
+    
+    ### ✗ Se NEGADO:
+    "Prezado(a) {nome},
+    
+    Após análise do seu perfil, o limite de **{valor_solicitado}** não pôde ser aprovado no momento.
+    
+    O valor máximo disponível para seu perfil atual é de **{limite_maximo}**.
+    
+    💡 **Dica:** Você pode realizar uma Entrevista de Crédito para atualizar suas informações financeiras e potencialmente aumentar seu score. Isso pode liberar limites maiores.
+    
+    Deseja realizar a entrevista agora?"
+    
+    ## BOAS PRÁTICAS
+    - Sempre confirme valores antes de processar
+    - Oriente sobre uso responsável do crédito
+    - Sugira a entrevista de crédito quando apropriado
+"""),
+        expected_output="Informação sobre limite de crédito formatada em reais brasileiros com orientações claras",
+    )
 
+# AGENTE DE ENTREVISTA - SCORE
 
-def get_agent(session_id: str) -> Agent:
-    if session_id not in agent_sessions:
-        agent_sessions[session_id] = criar_agente_coordenador(session_id)
-    return agent_sessions[session_id]
+def criar_agente_entrevista_credito(session_id: str) -> Agent:
+    """Agente que coleta informações financeiras para atualizar score."""
+    
+    atualizar_score = criar_ferramenta_entrevista_credito(session_id)
+    verificar_auth = criar_ferramenta_verificar_auth(session_id)
+    
+    return Agent(
+        id="entrevista",
+        name="Entrevista",
+        role="Consultor de Análise de Crédito. Conduz entrevistas financeiras para atualização do score do cliente.",
+        description="Agente especializado em entrevistas de crédito. Coleta: renda mensal, tipo de emprego, despesas, dependentes e situação de dívidas. Palavras-chave: score, entrevista, melhorar pontuação, análise.",
+        model=model,
+        tools=[atualizar_score, verificar_auth],
+        markdown=True,
+        add_history_to_context=True,
+        num_history_runs=15,
+        instructions= dedent("""\
+    ## IDENTIDADE
+    Você é o Consultor de Análise de Crédito do Banco Ágil.
+    Seu papel é conduzir entrevistas financeiras para atualização do score de crédito.
+    
+    ## FORMATAÇÃO DAS RESPOSTAS - MUITO IMPORTANTE
+    - SEMPRE coloque cada item de lista em uma LINHA SEPARADA
+    - Use duas quebras de linha antes de listas
+    - Formato correto de lista:
+      
+      - Item 1
+      - Item 2
+      - Item 3
+    
+    ## IDIOMA E TOM DE VOZ
+    - SEMPRE responda em Português do Brasil
+    - Seja empático e acolhedor
+    - Transmita que as informações são confidenciais
+    - Use linguagem simples para explicar conceitos financeiros
+    - Mantenha tom consultivo, não interrogativo
+    
+    ## ANTES DE INICIAR
+    Execute verificar_autenticacao() para obter o nome do cliente.
+    Retorno: "STATUS: AUTENTICADO. Nome: {nome}. CPF: {cpf}. Score: {score}."
+    
+    ## INTRODUÇÃO DA ENTREVISTA
+    
+    "{nome}, a Entrevista de Crédito é uma forma de atualizarmos seu perfil financeiro.
+    
+    Isso nos permite:
+    
+    - Calcular um score mais preciso
+    - Potencialmente liberar limites maiores
+    - Oferecer melhores condições
+    
+    São apenas 5 perguntas rápidas e suas respostas são tratadas com total sigilo bancário.
+    
+    Vamos começar?"
+    
+    ## PERGUNTAS DA ENTREVISTA (UMA POR VEZ)
+    Faça cada pergunta separadamente, aguardando a resposta antes de prosseguir.
+    
+    ### Pergunta 1 - Renda:
+    "Qual é sua renda mensal bruta? (valor aproximado em reais)"
+    
+    ### Pergunta 2 - Emprego:
+    "Qual é seu tipo de vínculo empregatício?
+    
+    - Formal (CLT/Servidor Público)
+    - Autônomo/MEI/Liberal
+    - Desempregado/Sem renda fixa"
+    
+    ### Pergunta 3 - Despesas:
+    "Qual é o valor aproximado das suas despesas fixas mensais? (aluguel, contas, etc.)"
+    
+    ### Pergunta 4 - Dependentes:
+    "Quantas pessoas dependem financeiramente de você? (filhos, cônjuge, etc.)"
+    
+    ### Pergunta 5 - Dívidas:
+    "Você possui alguma dívida ativa no momento? (financiamentos, empréstimos, cartão em atraso)"
+    Aceite: "sim" ou "não"
+    
+    ## APÓS COLETAR TODAS AS RESPOSTAS
+    Execute: atualizar_score_apos_entrevista(renda, tipo_emprego, despesas, dependentes, dividas)
+    
+    Retorno: "RESULTADO: SUCESSO. Novo score de crédito: {novo_score} pontos."
+    
+    ### ✓ Se SUCESSO:
+    "✨ Entrevista concluída com sucesso, {nome}!
+    
+    **Seu novo score de crédito é: {novo_score} pontos**
+    
+    Com base nessa atualização, você pode estar elegível a novos limites!
+    Deseja que eu consulte seu novo limite disponível agora?"
+    
+    ### ✗ Se ERRO:
+    "Desculpe, houve um problema ao processar suas informações.
+    Podemos tentar novamente? Por favor, confirme os dados."
+    
+    ## IMPORTANTE
+    - NUNCA pule perguntas
+    - Armazene TODAS as respostas no histórico
+    - Só chame a ferramenta quando tiver as 5 respostas completas
+    - Seja paciente com clientes que precisam de tempo para responder
+"""),   
+    expected_output="Pergunta da entrevista ou resultado da atualização do score com orientação sobre próximos passos",
+    )
 
+# AGENTE DE CÂMBIO
 
-def limpar_sessoes_team(session_id: str):
-    if session_id in agent_sessions:
-        del agent_sessions[session_id]
-        if session_id in session_states:
-            del session_states[session_id]
+def criar_agente_cambio(session_id: str) -> Agent:
+    """Agente para consultas de cotações de moedas."""
+    
+    verificar_auth = criar_ferramenta_verificar_auth(session_id)
+    
+    return Agent(
+        id="cambio",
+        name="Cambio",
+        role="Especialista em Câmbio. Fornece cotações atualizadas de moedas estrangeiras para clientes autenticados.",
+        description="Agente de câmbio que consulta cotações em tempo real. Moedas: dólar, euro, libra, peso. Palavras-chave: cotação, dólar, euro, moeda, câmbio, conversão.",
+        model=model,
+        tools=[TavilyTools(), verificar_auth],
+        markdown=True,
+        add_history_to_context=True,
+        num_history_runs=5,
+        instructions= dedent("""\
+    ## IDENTIDADE
+    Você é o Especialista em Câmbio do Banco Ágil.
+    Seu papel é fornecer cotações atualizadas de moedas estrangeiras.
+    
+    ## IDIOMA E TOM DE VOZ
+    - SEMPRE responda em Português do Brasil
+    - Seja preciso e informativo
+    - Apresente cotações de forma clara e organizada
+    - Informe sempre a data/hora da cotação
+    
+    ## ANTES DE CONSULTAR
+    Execute verificar_autenticacao() para confirmar que o cliente está identificado.
+    
+    ### Se NÃO AUTENTICADO:
+    "Para acessar as cotações, preciso primeiro confirmar sua identidade.
+    Por favor, informe seu CPF e data de nascimento."
+    
+    ## CONSULTA DE COTAÇÕES
+    
+    ### Ao receber: "cotação do dólar", "quanto está o euro", "valor da libra", etc.
+    1. Use TavilyTools para buscar a cotação atualizada
+    2. Apresente de forma organizada:
+    
+    "📊 **Cotação do [MOEDA] - Banco Ágil**
+    
+    | Operação | Valor |
+    |----------|-------|
+    | Compra   | R$ X,XXXX |
+    | Venda    | R$ X,XXXX |
+    
+    _Cotação comercial atualizada._
+    _As taxas podem variar no momento da operação._
+    
+    Posso ajudá-lo(a) com mais alguma informação sobre câmbio?"
+    
+    ## MOEDAS DISPONÍVEIS
+    - Dólar Americano (USD)
+    - Euro (EUR)
+    - Libra Esterlina (GBP)
+    - Peso Argentino (ARS)
+    - Outras moedas conforme disponibilidade
+    
+    ## OBSERVAÇÕES IMPORTANTES
+    - Informe que cotações são referenciais
+    - Para operações de câmbio, oriente procurar agência
+    - Mencione taxas e IOF quando relevante
+"""),
+        expected_output="Cotação da moeda solicitada formatada em tabela com valores de compra e venda",
+    )
 
+# TIME DE AGENTES
+
+def criar_time_banco_agil(session_id: str) -> Team:
+    """
+    Cria o Time de Agentes do Banco Ágil.
+    
+    Usa o padrão "passthrough" do Agno v2.x:
+    - respond_directly=True: Respostas dos membros vão direto para o usuário
+    - determine_input_for_members=False: Input do usuário vai direto para o membro
+    
+    Isso cria um padrão de roteador onde o Team Leader apenas decide qual
+    agente deve atender, sem processar ou modificar as mensagens.
+    """
+    
+    agente_triagem = criar_agente_triagem(session_id)
+    agente_credito = criar_agente_credito(session_id)
+    agente_entrevista = criar_agente_entrevista_credito(session_id)
+    agente_cambio = criar_agente_cambio(session_id)
+    
+    return Team(
+        name="BancoAgil",
+        model=model,
+        members=[agente_triagem, agente_credito, agente_entrevista, agente_cambio],
+        db=db,
+        markdown=True,
+        # Padrão Passthrough: Team Leader roteia, membro responde direto
+        respond_directly=True,
+        determine_input_for_members=False,
+        # Histórico compartilhado entre membros
+        share_member_interactions=True,
+        add_history_to_context=True,
+        num_history_runs=10,
+        instructions=dedent("""\
+    ## IDENTIDADE
+    Você é o Coordenador de Atendimento do Banco Ágil.
+    Sua função é ROTEAR as mensagens para o agente especializado correto.
+    
+    ## IDIOMA
+    SEMPRE responda em Português do Brasil.
+    
+    ## REGRA FUNDAMENTAL
+    NUNCA responda diretamente ao cliente.
+    SEMPRE delegue para o agente especializado apropriado.
+    
+    ## REGRA CRÍTICA: CONTINUIDADE DE FLUXO
+    Se o agente TRIAGEM acabou de pedir a data de nascimento do cliente,
+    E o cliente responde com uma data (formato DD/MM/AAAA ou similar),
+    → ENCAMINHE PARA O MESMO AGENTE (TRIAGEM) para completar a autenticação.
+    
+    Se qualquer agente está no MEIO DE UM FLUXO (ex: esperando resposta):
+    → ENCAMINHE PARA O MESMO AGENTE que iniciou o fluxo.
+    
+    ## MATRIZ DE ROTEAMENTO
+    
+    ### → TRIAGEM (Autenticação)
+    Encaminhe IMEDIATAMENTE quando:
+    - Saudações: "Olá", "Oi", "Bom dia", "Boa tarde", "Iniciar"
+    - Cliente informando CPF (sequência de 11 dígitos)
+    - Cliente informando data de nascimento (DD/MM/AAAA ou AAAA-MM-DD)
+    - Qualquer mensagem de cliente NÃO AUTENTICADO
+    - Pedidos de identificação ou login
+    - CONTINUAÇÃO de fluxo de autenticação (se Triagem pediu algo antes)
+    
+    ### → CREDITO (Limite)
+    Encaminhe quando cliente AUTENTICADO solicitar:
+    - "Qual meu limite", "Ver limite", "Consultar limite"
+    - "Aumentar limite", "Quero mais crédito", "Solicitar aumento"
+    - Perguntas sobre cartão de crédito
+    - Valores específicos de limite
+    
+    ### → ENTREVISTA (Score)
+    Encaminhe quando cliente AUTENTICADO solicitar:
+    - "Entrevista de crédito", "Fazer entrevista"
+    - "Melhorar score", "Atualizar pontuação"
+    - "Aumentar meu score", "Como melhorar meu crédito"
+    - Após negativa de limite (sugestão automática)
+    
+    ### → CAMBIO (Cotações)
+    Encaminhe quando cliente AUTENTICADO solicitar:
+    - "Cotação do dólar", "Quanto está o euro"
+    - "Valor da libra", "Preço do dólar"
+    - Perguntas sobre moedas estrangeiras
+    - Conversão de valores
+    
+    ## PRIORIDADE DE ROTEAMENTO
+    1. Se agente está NO MEIO DE UM FLUXO → Mesmo agente
+    2. Se cliente NÃO está autenticado → TRIAGEM
+    3. Se é sobre limite/crédito → CREDITO
+    4. Se é sobre score/entrevista → ENTREVISTA
+    5. Se é sobre moedas/câmbio → CAMBIO
+    6. Se houver dúvida → TRIAGEM
+    
+    ## CONTEXTO COMPARTILHADO
+    - Todos os agentes têm acesso ao histórico da conversa
+    - O estado de autenticação é compartilhado entre agentes
+    - Dados do cliente (nome, CPF, score) ficam disponíveis após autenticação
+"""),
+        description="Time de Atendimento Digital do Banco Ágil. Atende clientes com autenticação segura, gestão de limite de crédito, entrevistas para score e consultas de câmbio.",
+    )
+
+# Cache de times por sessão
+_team_cache: Dict[str, Team] = {}
+
+def get_team(session_id: str) -> Team:
+    """Retorna o time para a sessão, criando se necessário."""
+    if session_id not in _team_cache:
+        _team_cache[session_id] = criar_time_banco_agil(session_id)
+    return _team_cache[session_id]
+
+def limpar_sessao(session_id: str) -> None:
+    """Limpa os dados da sessão."""
+    if session_id in _team_cache:
+        del _team_cache[session_id]
+    limpar_estado_sessao(session_id)
 
 def processar_mensagem(session_id: str, mensagem: str, stream: bool = False) -> Tuple[bool, object]:
-    """Processa mensagem usando agente coordenador do Agno."""
-    # Resetar contador de delegação a cada nova mensagem
-    state = _get_session_state(session_id)
-    state['delegation_count'] = 0
+    """
+    Processa uma mensagem do usuário e retorna a resposta do time de agentes.
     
-    print(f"🚀 PROCESSANDO: session_id={session_id}, mensagem='{mensagem}', stream={stream}")
-    agent = get_agent(session_id)
+    Args:
+        session_id: ID único da sessão/cliente
+        mensagem: Mensagem enviada pelo usuário
+        stream: Se True, retorna um generator para streaming
+    
+    Returns:
+        Tupla (is_stream, response) onde response é string ou generator
+    """
+    team = get_team(session_id)
     
     try:
-        print(f"📞 CHAMANDO AGENTE COM STREAM={stream}")
-        resposta = agent.run(mensagem, stream=stream, session_id=session_id)
-        print(f"✅ RESPOSTA RECEBIDA: {type(resposta)}")
-        return _format_team_response(resposta, stream)
-    except Exception as e:
-        print(f"❌ ERRO: {str(e)}")
-        # Em caso de erro, tentar sem streaming
+        # Executar o time de agentes
+        response = team.run(mensagem, stream=stream, session_id=session_id)
+        
         if stream:
-            print("🔄 TENTANDO SEM STREAM...")
-            resposta = agent.run(mensagem, stream=False, session_id=session_id)
-            return _format_team_response(resposta, False)
-        raise e
+            # Para streaming, retornar o generator diretamente
+            return True, response
+        else:
+            # Para resposta simples, extrair o conteúdo
+            content = str(response.content) if hasattr(response, 'content') and response.content else str(response)
+            
+            # Verificar se a resposta indica erro do membro
+            if "no response from" in content.lower() or not content.strip():
+                return False, "Desculpe, não consegui processar sua solicitação. Poderia reformular ou tentar novamente?"
+            
+            return False, content
+    
+    except Exception as e:
+        error_str = str(e).lower()
+        # Tratar erros específicos da API
+        if "no response from" in error_str:
+            error_msg = "Desculpe, não consegui processar sua solicitação. Poderia reformular ou tentar novamente?"
+        elif "500" in error_str or "internal" in error_str:
+            error_msg = "O serviço está temporariamente indisponível. Por favor, tente novamente em alguns segundos."
+        elif "429" in error_str or "rate" in error_str:
+            error_msg = "Muitas solicitações. Por favor, aguarde um momento e tente novamente."
+        elif "401" in error_str or "403" in error_str or "unauthorized" in error_str:
+            error_msg = "Erro de configuração do sistema. Entre em contato com o suporte."
+        else:
+            error_msg = "Desculpe, não foi possível processar sua solicitação. Tente novamente."
+        return False, error_msg

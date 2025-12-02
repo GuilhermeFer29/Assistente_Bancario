@@ -1,8 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-python scripts/gerador_csv.py
-
 uvicorn main:app --host 0.0.0.0 --port 8000 &
 UVICORN_PID=$!
 

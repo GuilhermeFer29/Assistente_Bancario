@@ -1,0 +1,632 @@
+# 🏦 Assistente Bancário - Banco Ágil
+
+<div align="center">
+
+![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)
+![Agno](https://img.shields.io/badge/Agno-2.3.4-green)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.123-teal?logo=fastapi)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.51-red?logo=streamlit)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker)
+
+**Assistente Virtual Inteligente com Arquitetura Multi-Agentes**
+
+</div>
+
+---
+
+## 📋 Índice
+
+- [Visão Geral](#-visão-geral)
+- [Arquitetura do Sistema](#-arquitetura-do-sistema)
+- [Funcionalidades Implementadas](#-funcionalidades-implementadas)
+- [Desafios Enfrentados e Soluções](#-desafios-enfrentados-e-soluções)
+- [Escolhas Técnicas e Justificativas](#-escolhas-técnicas-e-justificativas)
+- [Tutorial de Execução](#-tutorial-de-execução)
+- [Estrutura do Código](#-estrutura-do-código)
+- [Testes](#-testes)
+
+---
+
+## 🎯 Visão Geral
+
+O **Banco Ágil** é um assistente bancário virtual desenvolvido com arquitetura de **Time de Agentes Especializados** utilizando o framework **Agno**. O sistema simula um atendimento bancário completo, oferecendo:
+
+- **Autenticação segura** via CPF e data de nascimento
+- **Consulta e solicitação de limite de crédito**
+- **Entrevista de crédito** para atualização de score
+- **Consulta de cotações de câmbio** em tempo real
+
+### Objetivos do Projeto
+
+1. Demonstrar arquitetura multi-agentes com delegação inteligente
+2. Implementar fluxos bancários realistas com validações de segurança
+3. Criar interface de chat moderna e responsiva
+4. Garantir persistência de sessão e histórico de conversas
+
+---
+
+## 🏗 Arquitetura do Sistema
+
+### Diagrama de Arquitetura
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         FRONTEND (Streamlit)                         │
+│                    Interface de Chat - Porta 8501                    │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ WebSocket
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         BACKEND (FastAPI)                            │
+│                      API REST/WS - Porta 8000                        │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    WebSocket Manager                         │    │
+│  │              Gerencia conexões por client_id                 │    │
+│  └─────────────────────────────┬───────────────────────────────┘    │
+└────────────────────────────────┼────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     TEAM DE AGENTES (Agno)                          │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                   🎯 COORDENADOR (Team Leader)               │    │
+│  │         Roteia mensagens para o agente especializado         │    │
+│  │              Padrão: Passthrough (respond_directly)          │    │
+│  └───────────┬─────────────┬─────────────┬─────────────┬───────┘    │
+│              │             │             │             │            │
+│              ▼             ▼             ▼             ▼            │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐   │
+│  │  🔐 TRIAGEM │ │  💳 CRÉDITO │ │ 📋 ENTREVISTA│ │  💱 CÂMBIO  │   │
+│  │             │ │             │ │             │ │             │   │
+│  │ Autenticação│ │   Limite    │ │   Score     │ │  Cotações   │   │
+│  │ CPF + Data  │ │  Consulta   │ │ 5 Perguntas │ │ Tempo Real  │   │
+│  │ 3 Tentativas│ │  Aumento    │ │ Atualização │ │ TavilyTools │   │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         CAMADA DE DADOS                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────────┐  │
+│  │ clientes.csv│  │score_credito│  │ solicitacoes_aumento_limite │  │
+│  │             │  │  _base.csv  │  │           .csv              │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────────┘  │
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │              SQLite (agno_sessions.db)                       │    │
+│  │         Persistência de sessões e histórico Agno             │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Fluxo de Dados
+
+```
+1. Usuário envia mensagem via Streamlit
+                    ↓
+2. WebSocket transmite para FastAPI
+                    ↓
+3. processar_mensagem() obtém/cria Team
+                    ↓
+4. Coordenador analisa e roteia para agente
+                    ↓
+5. Agente especializado executa ferramentas
+                    ↓
+6. Ferramentas acessam/modificam dados CSV
+                    ↓
+7. Resposta retorna pelo WebSocket
+                    ↓
+8. Streamlit renderiza mensagem formatada
+```
+
+### Agentes e Responsabilidades
+
+| Agente | ID | Função | Ferramentas |
+|--------|-----|--------|-------------|
+| **Triagem** | `triagem` | Autenticação do cliente | `autenticar_cliente`, `registrar_cpf`, `registrar_data_nascimento`, `verificar_autenticacao` |
+| **Crédito** | `credito` | Consulta e aumento de limite | `consultar_limite_credito`, `solicitar_aumento_limite`, `verificar_autenticacao` |
+| **Entrevista** | `entrevista` | Coleta dados e atualiza score | `atualizar_score_apos_entrevista`, `verificar_autenticacao` |
+| **Câmbio** | `cambio` | Cotações em tempo real | `TavilyTools` (busca web), `verificar_autenticacao` |
+
+### Padrão Passthrough (Agno v2.x)
+
+O Team utiliza o padrão **Passthrough** para roteamento:
+
+```python
+Team(
+    respond_directly=True,           # Resposta vai direto para usuário
+    determine_input_for_members=False, # Input não é modificado pelo líder
+    share_member_interactions=True,   # Histórico compartilhado
+)
+```
+
+Este padrão garante:
+- Respostas mais rápidas (sem processamento intermediário)
+- Preservação do tom e formatação de cada agente
+- Histórico consistente entre todos os membros
+
+---
+
+## ✨ Funcionalidades Implementadas
+
+### 1. 🔐 Autenticação Segura
+
+- Validação de CPF (11 dígitos) + Data de Nascimento
+- Suporte a entrada de dados separados ou juntos
+- **Limite de 3 tentativas** com bloqueio automático
+- Persistência de dados parciais na sessão (CPF/Data pendente)
+
+```
+Fluxo de Autenticação:
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│   Cliente    │───▶│ registrar_cpf│───▶│ Aguarda Data │
+│ informa CPF  │    │   (salva)    │    │              │
+└──────────────┘    └──────────────┘    └──────┬───────┘
+                                               │
+                                               ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│   Sucesso!   │◀───│  Autentica   │◀───│Cliente informa│
+│ Bem-vindo(a) │    │ automaticamente│   │    Data      │
+└──────────────┘    └──────────────┘    └──────────────┘
+```
+
+### 2. 💳 Gestão de Limite de Crédito
+
+- **Consulta de limite atual** formatado em reais (R$ XX.XXX,XX)
+- **Solicitação de aumento** com análise baseada em score
+- Aprovação automática se dentro da faixa permitida
+- Sugestão de entrevista quando negado
+
+**Tabela de Limites por Score:**
+
+| Score | Limite Máximo |
+|-------|---------------|
+| 0-299 | R$ 5.000,00 |
+| 300-599 | R$ 10.000,00 |
+| 600-799 | R$ 15.000,00 |
+| 800-1000 | R$ 25.000,00 |
+
+### 3. 📋 Entrevista de Crédito
+
+Coleta 5 informações financeiras para recalcular o score:
+
+1. **Renda mensal bruta** (valor em R$)
+2. **Tipo de emprego** (Formal/Autônomo/Desempregado)
+3. **Despesas fixas mensais** (valor em R$)
+4. **Número de dependentes** (0, 1, 2 ou 3+)
+5. **Possui dívidas ativas** (Sim/Não)
+
+**Fórmula do Score:**
+```
+score = (renda / (despesas + 1)) × 30 
+      + bonus_emprego 
+      + bonus_dependentes 
+      + bonus_dividas
+```
+
+| Fator | Valores |
+|-------|---------|
+| Emprego | Formal: +300, Autônomo: +200, Desempregado: 0 |
+| Dependentes | 0: +100, 1: +80, 2: +60, 3+: +30 |
+| Dívidas | Não: +100, Sim: -100 |
+
+### 4. 💱 Consulta de Câmbio
+
+- Cotações em tempo real via **TavilyTools** (busca web)
+- Moedas suportadas: USD, EUR, GBP, ARS
+- Apresentação em tabela com valores de compra e venda
+- Avisos sobre taxas e IOF
+
+### 5. 🎨 Interface de Usuário
+
+- **Tema bancário** dark (azul escuro e preto)
+- Chat responsivo com avatares diferenciados
+- Comandos especiais: `Iniciar` e `Finalizar`
+- Exibição de clientes de teste para demonstração
+- Sessão com ID único visível
+
+---
+
+## 🧩 Desafios Enfrentados e Soluções
+
+### Desafio 1: Persistência de Dados de Autenticação
+
+**Problema:** O modelo perdia o CPF informado quando o cliente enviava a data de nascimento em uma mensagem separada.
+
+**Solução:** Criação de ferramentas específicas com estado de sessão:
+
+```python
+# Estado persistido por sessão
+session_states[session_id] = {
+    "cpf_pendente": None,
+    "data_nascimento_pendente": None,
+    # ...
+}
+
+# Ferramenta que salva CPF e verifica se pode autenticar
+def registrar_cpf(cpf: str) -> str:
+    state["cpf_pendente"] = cpf
+    if state["data_nascimento_pendente"]:
+        # Já tem data, autenticar!
+        return autenticar()
+    return "CPF salvo. Informe a data."
+```
+
+### Desafio 2: Formatação de Respostas (Listas e Valores)
+
+**Problema:** Os bullet points apareciam na mesma linha, valores monetários não formatados corretamente.
+
+**Solução:** 
+1. Instruções explícitas de formatação para cada agente
+2. Função auxiliar `_formatar_reais()` para valores monetários
+3. Uso de hífens `-` em vez de bullets `•` para compatibilidade Markdown
+
+```python
+def _formatar_reais(valor: float) -> str:
+    """R$ 15.000,50 (padrão brasileiro)"""
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+```
+
+### Desafio 3: Sobrescrita de CSVs no Docker
+
+**Problema:** Os arquivos CSV eram recriados a cada restart do container, perdendo dados.
+
+**Solução:** Verificação de existência antes de gerar:
+
+```python
+# scripts/gerador_csv.py
+if not os.path.exists(CSV_PATH):
+    gerar_dados_iniciais()
+else:
+    print("CSV já existe, mantendo dados.")
+```
+
+### Desafio 4: Contexto Entre Mensagens (Histórico)
+
+**Problema:** O agente não lembrava de informações anteriores da conversa.
+
+**Solução:** Configuração correta do Agno:
+
+```python
+Agent(
+    add_history_to_context=True,  # Inclui histórico no prompt
+    num_history_runs=10,           # Últimas 10 interações
+)
+
+Team(
+    share_member_interactions=True,  # Compartilha entre agentes
+    db=SqliteDb(db_file="..."),      # Persiste em SQLite
+)
+```
+
+### Desafio 5: Roteamento para Agente Correto
+
+**Problema:** O coordenador às vezes enviava para o agente errado ou respondia diretamente.
+
+**Solução:** Instruções detalhadas de roteamento com matriz de decisão:
+
+```python
+instructions = """
+## MATRIZ DE ROTEAMENTO
+
+### → TRIAGEM
+- Saudações, CPF, data de nascimento
+- Cliente NÃO autenticado
+
+### → CRÉDITO  
+- "limite", "crédito", "aumentar"
+- Cliente AUTENTICADO
+
+### → ENTREVISTA
+- "score", "entrevista", "melhorar"
+
+### → CÂMBIO
+- "dólar", "euro", "cotação"
+"""
+```
+
+### Desafio 6: Placeholder vs Nome Real
+
+**Problema:** O agente respondia literalmente `[NOME]` em vez do nome do cliente.
+
+**Solução:** Uso de placeholders `{nome}`, `{score}`, `{limite}` com instruções claras de que são valores do retorno das ferramentas:
+
+```python
+instructions = """
+A ferramenta retorna: "STATUS: SUCESSO. Cliente {nome} autenticado."
+Use {nome} (valor real do retorno) na sua resposta.
+"""
+```
+
+---
+
+## 🔧 Escolhas Técnicas e Justificativas
+
+### Framework de Agentes: Agno v2.3.4
+
+| Critério | Justificativa |
+|----------|---------------|
+| **Multi-agentes** | Suporte nativo a Teams com roteamento |
+| **Ferramentas** | Fácil criação de tools com docstrings |
+| **Histórico** | Persistência automática em SQLite |
+| **Modelos** | Integração com Gemini, OpenAI, etc. |
+
+### Modelo de IA: Gemini 2.0 Flash Lite
+
+| Critério | Justificativa |
+|----------|---------------|
+| **Velocidade** | Respostas rápidas para chat |
+| **Custo** | Gratuito/baixo custo |
+| **Qualidade** | Suficiente para tarefas bancárias |
+| **Temperature** | 0.2 (respostas consistentes) |
+
+### Backend: FastAPI
+
+| Critério | Justificativa |
+|----------|---------------|
+| **WebSocket** | Suporte nativo para chat em tempo real |
+| **Async** | Alto throughput de conexões |
+| **Validação** | Pydantic integrado |
+| **Docs** | Swagger automático |
+
+### Frontend: Streamlit
+
+| Critério | Justificativa |
+|----------|---------------|
+| **Rapidez** | Protótipo funcional rápido |
+| **Chat** | Componentes nativos (`st.chat_*`) |
+| **Tema** | CSS customizável |
+| **Deploy** | Simples com Docker |
+
+### Armazenamento: CSV + SQLite
+
+| Dado | Formato | Justificativa |
+|------|---------|---------------|
+| Clientes | CSV | Fácil edição manual, demonstração |
+| Solicitações | CSV | Log simples de operações |
+| Sessões Agno | SQLite | Persistência robusta do framework |
+
+### Containerização: Docker Compose
+
+| Benefício | Descrição |
+|-----------|-----------|
+| **Isolamento** | Ambiente consistente |
+| **Volumes** | Persistência de `/data` |
+| **Multi-serviço** | Backend + Frontend juntos |
+| **Portabilidade** | Roda em qualquer máquina |
+
+---
+
+## 🚀 Tutorial de Execução
+
+### Pré-requisitos
+
+- **Docker** e **Docker Compose** instalados
+- Chave de API do **Google Gemini**
+- (Opcional) Chave da **Tavily** para cotações de câmbio
+
+### Passo a Passo
+
+#### 1. Clone o Repositório
+
+```bash
+git clone https://github.com/GuilhermeFer29/Assistente_Bancario.git
+cd Assistente_Bancario
+```
+
+#### 2. Configure as Variáveis de Ambiente
+
+```bash
+# Copie o exemplo
+cp .env.example .env
+
+# Edite com suas chaves
+nano .env
+```
+
+Conteúdo do `.env`:
+```env
+GOOGLE_API_KEY=sua_chave_gemini_aqui
+TAVILY_API_KEY=sua_chave_tavily_aqui  # opcional
+```
+
+#### 3. Execute com Docker Compose
+
+```bash
+# Build e execução
+docker compose up -d --build
+
+# Acompanhe os logs
+docker compose logs -f
+```
+
+#### 4. Acesse a Aplicação
+
+| Serviço | URL |
+|---------|-----|
+| **Chat (Streamlit)** | http://localhost:8501 |
+| **API (FastAPI)** | http://localhost:8000 |
+| **Docs Swagger** | http://localhost:8000/docs |
+
+#### 5. Teste o Assistente
+
+**Clientes de Teste Disponíveis:**
+
+> **Nota:** Os valores abaixo refletem o estado atual dos CSVs. Scores e limites podem variar conforme uso do sistema. Ao reiniciar com CSVs vazios, os valores padrão do `scripts/gerador_csv.py` serão aplicados.
+
+| Nome | CPF | Data de Nascimento | Score | Limite Atual |
+|------|-----|-------------------|-------|-------------|
+| Guilherme Fernandes | `12345678901` | `13/02/1995` | 519 | R$ 10.000,00 |
+| Leci Cardoso | `98765432100` | `16/08/1996` | 680 | R$ 5.000,00 |
+| Safira Cardoso | `11122233344` | `07/11/2000` | 720 | R$ 5.000,00 |
+
+**Fluxo de Teste Sugerido:**
+
+```
+1. Digite: Iniciar
+2. Informe: 12345678901
+3. Informe: 13/02/1995
+4. Peça: Qual meu limite?
+5. Solicite: Quero aumentar para 15000
+6. Se negado: Fazer entrevista
+7. Responda as 5 perguntas
+8. Peça: Cotação do dólar
+9. Digite: Finalizar
+```
+
+### Execução Local (Sem Docker)
+
+```bash
+# Crie ambiente virtual
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# ou: venv\Scripts\activate  # Windows
+
+# Instale dependências
+pip install -r requirements.txt
+
+# Configure variáveis
+export GOOGLE_API_KEY=sua_chave
+
+# Execute backend (terminal 1)
+python main.py
+
+# Execute frontend (terminal 2)
+streamlit run frontend/streamlit_front.py
+```
+
+---
+
+## 📁 Estrutura do Código
+
+```
+Assistente_Bancario/
+│
+├── 📂 agent/                    # Camada de Agentes
+│   ├── agents.py               # Definição dos 4 agentes + Team
+│   ├── constants.py            # Constantes (tokens, configs)
+│   └── __init__.py
+│
+├── 📂 tools/                    # Ferramentas dos Agentes
+│   ├── ferramentas_agentes.py  # Factories de tools por sessão
+│   ├── tools.py                # Lógica de negócio (validação, score)
+│   └── __init__.py
+│
+├── 📂 services/                 # Serviços de Infraestrutura
+│   ├── clientes.py             # CRUD de clientes (CSV)
+│   ├── websocket_manager.py    # Gerenciador de conexões WS
+│   └── __init__.py             # Helpers (normalização, limites)
+│
+├── 📂 routes/                   # Rotas da API
+│   └── chat_rotas.py           # Endpoint WebSocket /chat/ws
+│
+├── 📂 middlewares/              # Middlewares FastAPI
+│   └── login_conexao.py        # Logging de conexões
+│
+├── 📂 frontend/                 # Interface de Usuário
+│   └── streamlit_front.py      # Chat com tema bancário
+│
+├── 📂 data/                     # Dados Persistidos
+│   ├── clientes.csv            # Base de clientes
+│   ├── score_credito_base.csv  # Faixas de score/limite
+│   ├── solicitacoes_*.csv      # Log de solicitações
+│   └── agno_sessions.db        # Sessões do Agno (SQLite)
+│
+├── 📂 scripts/                  # Scripts Auxiliares
+│   └── gerador_csv.py          # Gera dados iniciais
+│
+├── 📂 tests/                    # Testes Automatizados
+│   ├── conftest.py             # Fixtures pytest
+│   ├── test_agents.py          # Testes dos agentes
+│   ├── test_api.py             # Testes da API
+│   ├── test_tools.py           # Testes das ferramentas
+│   └── test_streaming.py       # Testes de streaming
+│
+├── main.py                      # Entrypoint FastAPI
+├── Dockerfile                   # Imagem Docker
+├── docker-compose.yml           # Orquestração
+├── docker-entrypoint.sh         # Script de inicialização
+├── requirements.txt             # Dependências Python
+├── .env.example                 # Exemplo de variáveis
+└── README.md                    # Esta documentação
+```
+
+### Responsabilidades por Módulo
+
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `agent/` | Orquestração de agentes, instruções, roteamento |
+| `tools/` | Lógica de negócio, validações, cálculos |
+| `services/` | Acesso a dados, WebSocket, helpers |
+| `routes/` | Endpoints HTTP/WebSocket |
+| `frontend/` | Interface visual, tema, UX |
+| `data/` | Persistência de estado e histórico |
+| `tests/` | Garantia de qualidade |
+
+---
+
+## 🧪 Testes
+
+### Executar Todos os Testes
+
+```bash
+# Com pytest
+pytest tests/ -v
+
+# Com cobertura
+pytest tests/ --cov=. --cov-report=html
+```
+
+### Estrutura de Testes
+
+| Arquivo | Cobertura |
+|---------|-----------|
+| `test_tools.py` | Validação de cliente, cálculo de score, limites |
+| `test_agents.py` | Criação de agentes, processamento de mensagens |
+| `test_api.py` | Endpoints REST, WebSocket |
+| `test_streaming.py` | Respostas em stream |
+
+### Exemplo de Teste
+
+> **Nota:** Os testes utilizam um ambiente isolado em `tmp_path` com dados de teste específicos via fixtures, diferentes dos dados de demonstração em `data/clientes.csv`.
+
+```python
+# conftest.py - Fixture cria dados de teste isolados
+@pytest.fixture
+def csv_environment(tmp_path, monkeypatch):
+    # Cria ambiente isolado em diretório temporário
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("AGNO_DATA_DIR", str(data_dir))
+    # Popula CSVs com dados de teste
+    pd.DataFrame([
+        {"cpf": "12345678901", "nome": "Cliente Teste", ...}
+    ]).to_csv(...)
+
+# test_tools.py - Usa dados da fixture
+def test_validando_cliente_sucesso(tools_module):
+    resultado = tools_module.validando_cliente("123.456.789-01", "13/02/1995")
+    assert resultado["status"] == "ok"
+    assert resultado["nome"] == "Cliente Teste"  # Nome da fixture
+```
+
+---
+
+## 📄 Licença
+
+Este projeto foi desenvolvido como parte de um desafio técnico.
+
+---
+
+## 👨‍💻 Autor
+
+**Guilherme Fernandes**
+
+[![GitHub](https://img.shields.io/badge/GitHub-GuilhermeFer29-black?logo=github)](https://github.com/GuilhermeFer29)
+
+---
+
+<div align="center">
+
+**🏦 Banco Ágil - Seu banco digital, ágil e seguro!**
+
+</div>

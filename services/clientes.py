@@ -143,16 +143,21 @@ def registrar_solicitacao_limite(
 ) -> None:
     registro = {
         "cpf_cliente": limpar_cpf(cpf),
-        "data_hora_solicitacao": _dt.datetime.utcnow().isoformat(),
+        "data_hora_solicitacao": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "limite_atual": float(limite_atual),
         "novo_limite_solicitado": float(novo_limite),
         "status_pedido": status,
     }
     with _locked_csv(_SOLICITACOES_CSV):
         df_solicitacoes = pd.read_csv(_SOLICITACOES_CSV)
-        df_solicitacoes = pd.concat(
-            [df_solicitacoes, pd.DataFrame([registro])], ignore_index=True
-        )
+        novo_registro = pd.DataFrame([registro])
+        # Garantir que as colunas tenham os mesmos tipos antes do concat
+        if df_solicitacoes.empty:
+            df_solicitacoes = novo_registro
+        else:
+            df_solicitacoes = pd.concat(
+                [df_solicitacoes, novo_registro], ignore_index=True
+            )
         df_solicitacoes.to_csv(_SOLICITACOES_CSV, index=False)
 
 
