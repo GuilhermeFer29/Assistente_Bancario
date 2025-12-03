@@ -6,6 +6,7 @@ import pytest
 from tools.ferramentas_agentes import (
     get_session_state,
     limpar_estado_sessao,
+    obter_cpf_autenticado,
     criar_ferramenta_registrar_cpf,
     criar_ferramenta_registrar_data_nascimento,
     criar_ferramenta_autenticacao,
@@ -287,3 +288,47 @@ class TestEntrevistaCredito:
         )
         
         assert "ERRO" in resultado
+
+
+class TestObterCpfAutenticado:
+    """Testes para a função obter_cpf_autenticado (usada na memória do Agno)."""
+    
+    def test_obter_cpf_nao_autenticado(self, session_id):
+        """Deve retornar None quando não autenticado."""
+        limpar_estado_sessao(session_id)
+        get_session_state(session_id)  # Inicializa sessão
+        
+        cpf = obter_cpf_autenticado(session_id)
+        
+        assert cpf is None
+    
+    def test_obter_cpf_autenticado_sucesso(self, session_id):
+        """Deve retornar CPF quando autenticado."""
+        state = get_session_state(session_id)
+        state["autenticado"] = True
+        state["cpf"] = "12345678901"
+        state["nome"] = "Cliente Teste"
+        
+        cpf = obter_cpf_autenticado(session_id)
+        
+        assert cpf == "12345678901"
+    
+    def test_obter_cpf_autenticado_sem_cpf(self, session_id):
+        """Deve retornar None se autenticado mas sem CPF (caso edge)."""
+        state = get_session_state(session_id)
+        state["autenticado"] = True
+        state["cpf"] = None
+        
+        cpf = obter_cpf_autenticado(session_id)
+        
+        assert cpf is None
+    
+    def test_obter_cpf_sessao_inexistente(self):
+        """Deve retornar None para sessão que não existe."""
+        cpf = obter_cpf_autenticado("sessao-inexistente-xyz")
+        
+        assert cpf is None
+        
+        # Cleanup
+        if "sessao-inexistente-xyz" in session_states:
+            del session_states["sessao-inexistente-xyz"]

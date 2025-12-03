@@ -21,6 +21,7 @@ from tools.ferramentas_agentes import (
     criar_ferramenta_solicitar_limite,
     criar_ferramenta_entrevista_credito,
     limpar_estado_sessao,
+    obter_cpf_autenticado,
 )
 
 load_dotenv()
@@ -419,6 +420,8 @@ def criar_time_banco_agil(session_id: str) -> Team:
         members=[agente_triagem, agente_credito, agente_entrevista, agente_cambio],
         db=db,
         markdown=True,
+        # Memória automática: Agno extrai e armazena fatos do cliente automaticamente
+        enable_user_memories=True,
         # Padrão Passthrough: Team Leader roteia, membro responde direto
         respond_directly=True,
         determine_input_for_members=False,
@@ -523,9 +526,12 @@ def processar_mensagem(session_id: str, mensagem: str, stream: bool = False) -> 
     """
     team = get_team(session_id)
     
+    # Obter CPF autenticado para usar como user_id (isola memórias por cliente)
+    user_id = obter_cpf_autenticado(session_id)
+    
     try:
-        # Executar o time de agentes
-        response = team.run(mensagem, stream=stream, session_id=session_id)
+        # Executar o time de agentes com user_id para memória personalizada
+        response = team.run(mensagem, stream=stream, session_id=session_id, user_id=user_id)
         
         if stream:
             # Para streaming, retornar o generator diretamente

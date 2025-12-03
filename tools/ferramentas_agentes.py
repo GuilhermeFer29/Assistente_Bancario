@@ -34,6 +34,21 @@ def limpar_estado_sessao(session_id: str) -> None:
     if session_id in session_states:
         del session_states[session_id]
 
+
+def obter_cpf_autenticado(session_id: str) -> str | None:
+    """
+    Retorna o CPF do cliente autenticado na sessão.
+    Usado para identificar o user_id na memória do Agno.
+    
+    Returns:
+        CPF do cliente se autenticado, None caso contrário.
+    """
+    state = get_session_state(session_id)
+    if state.get("autenticado") and state.get("cpf"):
+        return state["cpf"]
+    return None
+
+
 # FERRAMENTAS DE TRIAGEM (AUTENTICAÇÃO)
 
 def criar_ferramenta_registrar_cpf(session_id: str):

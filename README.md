@@ -293,23 +293,33 @@ except Exception as e:
         return False, error_msg
 ```
 
-### Desafio 4: Contexto Entre Mensagens (Histórico)
+### Desafio 4: Contexto Entre Mensagens (Histórico e Memória)
 
-**Problema:** O agente não lembrava de informações anteriores da conversa e nao avia persistência de histórico e estado da sessão.
+**Problema:** O agente não lembrava de informações anteriores da conversa, não havia persistência de histórico/estado da sessão, e não memorizava preferências ou fatos sobre o cliente entre sessões.
 
-**Solução:** Configuração correta do Agno, a criação do banco SQLite para persistência automática do histórico e estado da sessão.
+**Solução:** Configuração do Agno com histórico de sessão + **Memória Automática** (`enable_user_memories=True`). O Agno extrai e armazena automaticamente fatos relevantes sobre cada cliente (ex: "prefere atendimento rápido", "interessado em aumento de limite"), isolados por `user_id` (CPF).
 
 ```python
 Agent(
     add_history_to_context=True,  # Inclui histórico no prompt
-    num_history_runs=10,           # Ajustavel conforme necessidade
+    num_history_runs=10,           # Ajustável conforme necessidade
 )
 
 Team(
     share_member_interactions=True,  # Compartilha entre agentes
     db=SqliteDb(db_file="..."),      # Persiste em banco de dados SQLite
+    enable_user_memories=True,       # Memória automática por cliente
 )
+
+# No processar_mensagem, usa CPF como user_id para isolar memórias
+response = team.run(mensagem, session_id=session_id, user_id=cpf_autenticado)
 ```
+
+**Benefícios da Memória Automática:**
+- Lembra preferências do cliente entre sessões
+- Fatos extraídos automaticamente (sem código adicional)
+- Isolamento por CPF (cada cliente tem sua própria memória)
+- Persistido no mesmo SQLite das sessões
 
 ### Desafio 5: Roteamento para Agente Correto
 
