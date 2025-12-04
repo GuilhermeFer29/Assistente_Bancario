@@ -47,13 +47,28 @@ def set_api_keys_in_env(google_key: str, tavily_key: str = None):
         os.environ["TAVILY_API_KEY"] = tavily_key
 
 
+def is_port_in_use(port: int) -> bool:
+    """Verifica se a porta já está em uso."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return False
+        except OSError:
+            return True
+
+
 def start_fastapi_server():
     """Inicia o servidor FastAPI em uma thread separada."""
     import uvicorn
     from main import app
     
-    # Configurar para rodar em porta diferente se necessário
     port = int(os.getenv("FASTAPI_PORT", "8000"))
+    
+    # Verificar se a porta já está em uso
+    if is_port_in_use(port):
+        print(f"⚠️ Porta {port} já está em uso. FastAPI provavelmente já está rodando.")
+        return
     
     uvicorn.run(
         app,
@@ -68,6 +83,13 @@ def ensure_fastapi_running():
     """Garante que o FastAPI está rodando em background."""
     if "fastapi_started" not in st.session_state:
         st.session_state.fastapi_started = False
+    
+    port = int(os.getenv("FASTAPI_PORT", "8000"))
+    
+    # Se a porta já está em uso, assumir que FastAPI está rodando
+    if is_port_in_use(port):
+        st.session_state.fastapi_started = True
+        return
     
     if not st.session_state.fastapi_started:
         # Iniciar FastAPI em thread daemon
