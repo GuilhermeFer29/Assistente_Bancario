@@ -15,7 +15,7 @@
 ---
 
 ## 📋 Índice
-- [Link para teste via streamlit cloud](https://bancoagil.streamlit.app/)
+- [Link para teste via streamlit cloud](https://bancoagilasistente.streamlit.app/)
 - [Visão Geral](#-visão-geral)
 - [Arquitetura do Sistema](#-arquitetura-do-sistema)
 - [Funcionalidades Implementadas](#-funcionalidades-implementadas)
