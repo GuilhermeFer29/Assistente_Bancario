@@ -45,6 +45,7 @@ O **Banco Ágil** é um assistente bancário virtual desenvolvido com arquitetur
 3. Criar interface de chat moderna e responsiva
 4. Garantir persistência de sessão e histórico de conversas
 
+**Link para teste via streamlit cloud ** https://bancoagil.streamlit.app/
 ---
 
 ## 🏗 Arquitetura do Sistema
