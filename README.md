@@ -535,6 +535,9 @@ streamlit run frontend/streamlit_front.py
 ```
 Assistente_Bancario/
 │
+├── 📂 .streamlit/               # Configuração Streamlit
+│   └── secrets.toml.example    # Exemplo de secrets (NÃO commitar o real!)
+│
 ├── 📂 agent/                    # Camada de Agentes
 │   ├── agents.py               # Definição dos 4 agentes + Team
 │   ├── constants.py            # Constantes (tokens, configs)
@@ -575,6 +578,7 @@ Assistente_Bancario/
 │   ├── test_tools.py           # Testes das ferramentas
 │   └── test_streaming.py       # Testes de streaming
 │
+├── streamlit_app.py             # 🆕 Entry point Streamlit Cloud
 ├── main.py                      # Entrypoint FastAPI
 ├── Dockerfile                   # Imagem Docker
 ├── docker-compose.yml           # Orquestração
