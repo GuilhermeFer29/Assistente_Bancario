@@ -8,3 +8,6 @@ __pycache__/
 .locks
 .pytest_cache/
 docs/
+
+# Streamlit secrets (nunca commitar chaves reais!)
+.streamlit/secrets.toml
