@@ -53,7 +53,7 @@ Assistente_Bancario_V2/
 │   │   │   ├── db/                   # models, database, seed
 │   │   │   ├── domain/               # schemas Pydantic
 │   │   │   ├── api/                  # rotas_clientes, otp, saldo, contas, transacao, confirmacao
-│   │   │   ├── templates/            # confirmacao.html, sucesso.html, erro.html
+│   │   │   ├── templates/            # confirmacao.html, sucesso.html, erro.html, expirado.html
 │   │   │   ├── static/               # style.css
 │   │   │   └── tests/
 │   │   └── __init__.py
@@ -134,11 +134,11 @@ Prioridade:
 
 | Tabela | Campos principais |
 |---|---|
-| `clientes` | `id_cliente` (unique), `nome`, `email`, `telefone`, `dt_nascimento`, `cpf`, `score_credito`, `renda_mensal`, `limite_credito`, `confiavel`, `ativo`, `senha_hash` (Argon2 — confirmação web) |
+| `clientes` | `id_cliente` (unique), `nome`, `email`, `telefone`, `dt_nascimento`, `cpf` (legado V1, não usado em auth), `score_credito`, `renda_mensal`, `limite_credito`, `confiavel`, `ativo`, `senha_hash` (Argon2 — confirmação web) |
 | `saldos` | `id_cliente` (FK), `saldo_disponivel`, `saldo_bloqueado`, `atualizado_em` |
 | `contas` | `id_conta`, `id_cliente`, `descricao`, `valor`, `data_vencimento`, `status` (PENDENTE/PAGA/CANCELADA), `tipo` (a_pagar/a_receber), `nome_pagador?`, `data_prevista?` |
 | `transacoes` | `id_requisicao`, `id_cliente`, `chave_idempotencia` (unique), `tipo`, `valor`, `data_vencimento`, `status` (PENDENTE/CONFIRMADA/REJEITADA/DUPLICADA), `criado_em` |
-| `solicitacoes_limite` | `cpf_cliente`, `data_hora_solicitacao`, `limite_atual`, `novo_limite_solicitado`, `status_pedido` |
+| `solicitacoes_limite` | `id_cliente` (FK), `data_hora_solicitacao`, `limite_atual`, `novo_limite_solicitado`, `status_pedido` |
 | `score_credito_base` | `score_min`, `score_max`, `limite_maximo` |
 | `confirmacoes_pendentes` | `token` (UUID hex), `id_cliente`, `dados_transacao_json`, `status`, `tentativas_senha`, `expira_em` |
 | `otps` | `id`, `id_cliente`, `codigo_hash` (Argon2), `criado_em`, `expira_em`, `tentativas`, `consumido`, `bloqueado_ate?` |
