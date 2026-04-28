@@ -1,0 +1,20 @@
+{% extends "_base.html" %}
+{% block titulo %}Confirmação concluída{% endblock %}
+{% block conteudo %}
+<section class="card sucesso">
+  <h1>✅ Operação confirmada!</h1>
+  {% if ja_confirmado %}
+    <p>Esta operação já havia sido confirmada anteriormente.</p>
+  {% else %}
+    <p>Sua <strong>{{ operacao | replace("_", " ") }}</strong> foi processada com sucesso.</p>
+    {% if resultado %}
+      <ul>
+      {% for chave, valor in resultado.items() %}
+        <li><strong>{{ chave }}:</strong> {{ valor }}</li>
+      {% endfor %}
+      </ul>
+    {% endif %}
+  {% endif %}
+  <p class="dica">Você já pode voltar à conversa do assistente.</p>
+</section>
+{% endblock %}

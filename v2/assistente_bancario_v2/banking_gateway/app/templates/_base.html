@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Banco Ágil{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="painel">
+    <header class="topo">
+      <div class="logo">🏦 Banco Ágil</div>
+    </header>
+    {% block conteudo %}{% endblock %}
+    <footer class="rodape">
+      <small>Assistente Bancário V2 — operação fictícia</small>
+    </footer>
+  </main>
+</body>
+</html>

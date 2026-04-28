@@ -1,0 +1,9 @@
+{% extends "_base.html" %}
+{% block titulo %}Erro{% endblock %}
+{% block conteudo %}
+<section class="card erro">
+  <h1>❌ Não foi possível continuar</h1>
+  <p>{{ motivo }}</p>
+  <p class="dica">Volte ao chat do assistente para começar de novo.</p>
+</section>
+{% endblock %}

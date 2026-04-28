@@ -1,0 +1,43 @@
+# Python
+__pycache__
+*.py[cod]
+*.egg-info
+.venv
+venv
+env
+
+# Cache / coverage
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+coverage.xml
+
+# Banco gerado em runtime
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Ambiente / IDE
+.env
+.env.local
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Docs e infra (não precisa dentro da imagem do app)
+docs
+infra/Dockerfile.*
+infra/docker-compose.yml
+
+# Logs
+*.log
+logs

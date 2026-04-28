@@ -1,0 +1,48 @@
+# === Framework Web ===
+fastapi==0.131.0
+uvicorn[standard]==0.41.0
+httpx==0.28.1
+websockets==14.2
+
+# === Validação e Configuração ===
+pydantic==2.12.5
+pydantic-settings==2.13.1
+
+# === Banco de Dados ===
+sqlmodel==0.0.34
+aiosqlite==0.22.1
+
+# === Segurança ===
+argon2-cffi==25.1.0
+python-jose[cryptography]==3.5.0
+slowapi==0.1.9
+
+# === Agentes IA ===
+agno==2.5.3
+google-genai==1.64.0
+tavily-python
+
+# === E-mail ===
+aiosmtplib==3.0.2
+Jinja2==3.1.6
+
+# === Logging ===
+structlog==25.5.0
+
+# === Frontend ===
+streamlit==1.51.0
+websocket-client==1.8.0
+pandas==2.3.3
+
+# === Testes ===
+pytest==9.0.2
+pytest-asyncio==1.3.0
+pytest-cov==7.0.0
+
+# === Qualidade ===
+ruff==0.15.2
+mypy==1.19.1
+
+# === Utilitários ===
+python-dotenv==1.2.1
+cachetools==5.5.0

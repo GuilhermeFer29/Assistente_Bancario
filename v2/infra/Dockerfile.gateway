@@ -1,0 +1,41 @@
+# =================================================================
+# Banking Gateway — imagem self-contained
+# =================================================================
+FROM python:3.12-slim-bookworm AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app \
+    PORT=8001
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Usuário não-root
+RUN addgroup --system app && adduser --system --ingroup app app
+
+# Dependências
+COPY requirements.txt /app/requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# Código
+COPY assistente_bancario_v2 /app/assistente_bancario_v2
+COPY data/seed /app/data/seed
+
+# Pastas writeable do banco em runtime
+RUN mkdir -p /app/data && chown -R app:app /app
+
+USER app
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=15s --timeout=3s --retries=5 --start-period=10s \
+    CMD curl -fsS http://localhost:${PORT}/health || exit 1
+
+CMD ["sh", "-c", "uvicorn assistente_bancario_v2.banking_gateway.app.main:app --host 0.0.0.0 --port ${PORT}"]

@@ -1,0 +1,27 @@
+{% extends "_base.html" %}
+{% block titulo %}Confirmação — Banco Ágil{% endblock %}
+{% block conteudo %}
+<section class="card">
+  <h1>🔒 Confirme sua operação</h1>
+  <p>Olá, <strong>{{ nome }}</strong>. Para concluir, valide com sua senha de transação.</p>
+
+  <div class="resumo">
+    <h2>{{ operacao_titulo }}</h2>
+    <dl>
+      {% for chave, valor in items %}
+      <dt>{{ chave }}</dt><dd>{{ valor }}</dd>
+      {% endfor %}
+    </dl>
+  </div>
+
+  {% if erro %}
+  <p class="alerta">{{ erro }} (tentativas restantes: {{ tentativas_restantes }})</p>
+  {% endif %}
+
+  <form method="post" action="/confirmar/{{ token }}" autocomplete="off">
+    <label for="senha">Senha de transação</label>
+    <input type="password" id="senha" name="senha" required minlength="3" maxlength="64" autofocus>
+    <button type="submit">Confirmar</button>
+  </form>
+</section>
+{% endblock %}
