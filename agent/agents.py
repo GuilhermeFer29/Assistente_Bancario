@@ -27,7 +27,7 @@ from tools.ferramentas_agentes import (
 load_dotenv()
 
 # Modelo configurado para todos os agentes
-model = Gemini(id="gemini-2.0-flash-lite", temperature=0.2)
+model = Gemini(id="gemini-3-flash-preview", temperature=0.2)
 
 # Database para persistência de sessões do Team
 db = SqliteDb(db_file="data/agno_sessions.db")
